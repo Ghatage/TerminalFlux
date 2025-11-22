@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Three.js - FAL AI Ground Game</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            font-family: Arial, sans-serif;
+            background: #000;
+        }
+
+        #canvas-container {
+            width: 100vw;
+            height: 100vh;
+        }
+
+        #info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 14px;
+            z-index: 100;
+            max-width: 300px;
+        }
+
+        #info h2 {
+            margin: 0 0 10px 0;
+            font-size: 18px;
+            color: #00d4ff;
+        }
+
+        #info p {
+            margin: 5px 0;
+            line-height: 1.5;
+        }
+
+        #debug-info {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            color: #fff;
+            background: rgba(0, 0, 0, 0.7);
+            padding: 15px 20px;
+            border-radius: 8px;
+            font-size: 12px;
+            z-index: 100;
+            font-family: 'Courier New', monospace;
+            min-width: 280px;
+        }
+
+        #debug-info h3 {
+            margin: 0 0 10px 0;
+            font-size: 14px;
+            color: #00d4ff;
+        }
+
+        #debug-info .info-line {
+            margin: 4px 0;
+            display: flex;
+            justify-content: space-between;
+        }
+
+        #debug-info .label {
+            color: #00d4ff;
+        }
+
+        #debug-info .value {
+            color: #fff;
+            text-align: right;
+        }
+
+        #loading {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #00d4ff;
+            font-size: 24px;
+            text-align: center;
+            z-index: 101;
+            background: rgba(0, 0, 0, 0.9);
+            padding: 40px 60px;
+            border-radius: 16px;
+            border: 2px solid #00d4ff;
+            box-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            margin: 20px auto;
+            border: 4px solid rgba(0, 212, 255, 0.2);
+            border-top: 4px solid #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .hidden {
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div id="loading">
+        <div class="spinner"></div>
+        <p>Initializing...</p>
+        <p style="font-size: 14px; margin-top: 10px;">Starting up</p>
+    </div>
+
+    <div id="info">
+        <h2>FAL AI 3D Scene</h2>
+        <p id="setup-message" style="color: #ffaa00; font-weight: bold; margin-top: 10px; font-size: 16px;">
+            SETUP MODE: Press R/T to orient, then S to start!
+        </p>
+        <p style="margin-top: 10px;"><strong>Setup Controls:</strong></p>
+        <p>R/T: Rotate Character</p>
+        <p>S: Save & Start Game</p>
+        <p style="margin-top: 10px;"><strong>Gameplay:</strong></p>
+        <p>W/A/S/D: Move Character</p>
+        <p>SPACE: Jump</p>
+        <p style="margin-top: 10px;"><strong>Camera:</strong></p>
+        <p>🖱️ Left Mouse: Rotate</p>
+        <p>🖱️ Right Mouse: Pan</p>
+        <p>🖱️ Scroll: Zoom</p>
+        <p style="margin-top: 10px;"><strong>Debug:</strong></p>
+        <p>H: Toggle Helpers</p>
+        <p>I: Toggle Debug Info</p>
+    </div>
+
+    <div id="debug-info">
+        <h3>Debug Info</h3>
+        <div class="info-line">
+            <span class="label">Game Mode:</span>
+            <span class="value" id="game-mode" style="color: #ffaa00; font-weight: bold;">SETUP</span>
+        </div>
+        <div class="info-line">
+            <span class="label">Camera Position:</span>
+            <span class="value" id="camera-pos">-</span>
+        </div>
+        <div class="info-line">
+            <span class="label">Camera Direction:</span>
+            <span class="value" id="camera-dir">-</span>
+        </div>
+        <div class="info-line">
+            <span class="label">Model Rotation:</span>
+            <span class="value" id="model-rot">-</span>
+        </div>
+        <div class="info-line">
+            <span class="label">Current View:</span>
+            <span class="value" id="current-view">-</span>
+        </div>
+        <div class="info-line">
+            <span class="label">Helpers Visible:</span>
+            <span class="value" id="helpers-visible">Yes</span>
+        </div>
+    </div>
+
+    <div id="canvas-container"></div>
+
+    <!-- Import Three.js and Cannon.js from CDN -->
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js",
+                "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.170.0/examples/jsm/",
+                "cannon-es": "https://cdn.jsdelivr.net/npm/cannon-es@0.20.0/dist/cannon-es.js"
+            }
+        }
+    </script>
+
+    <!-- Import our main application -->
+    <script type="module" src="app.js"></script>
+</body>
+</html>
