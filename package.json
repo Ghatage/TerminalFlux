@@ -16,6 +16,7 @@
   "author": "Anup",
   "license": "MIT",
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.70.1",
     "@fal-ai/client": "^1.1.0",
     "cannon-es": "^0.20.0",
     "cors": "^2.8.5",

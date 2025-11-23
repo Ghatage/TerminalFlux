@@ -1,5 +1,6 @@
 import express from 'express';
 import { fal } from '@fal-ai/client';
+import Anthropic from '@anthropic-ai/sdk';
 import { config } from 'dotenv';
 import cors from 'cors';
 import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
@@ -19,6 +20,11 @@ config();
 // Configure FAL AI client
 fal.config({
   credentials: process.env.FAL_KEY
+});
+
+// Configure Anthropic AI client
+const anthropic = new Anthropic({
+  apiKey: process.env.ANTHROPIC_API_KEY
 });
 
 // Parse CLI arguments
@@ -937,6 +943,89 @@ app.get('/api/sessions/:id/assets/check', async (req, res) => {
     });
   } catch (error) {
     console.error('[SESSION] Error checking asset:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ==================== LLM API ENDPOINTS ====================
+
+// Query Claude with structured JSON output
+app.post('/api/llm/query', async (req, res) => {
+  try {
+    const { prompt } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Prompt is required'
+      });
+    }
+
+    console.log('[LLM] Received query:', prompt.substring(0, 100) + '...');
+
+    // Call Anthropic API with structured output using raw fetch
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'structured-outputs-2025-11-13'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 1024,
+        messages: [
+          {
+            role: 'user',
+            content: prompt
+          }
+        ],
+        output_format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: {
+              question: {
+                type: 'string',
+                description: 'The question or prompt that was asked'
+              },
+              answer: {
+                type: 'string',
+                description: 'The answer or response to the question'
+              }
+            },
+            required: ['question', 'answer'],
+            additionalProperties: false
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} ${errorData}`);
+    }
+
+    const responseData = await response.json();
+    console.log('[LLM] Response received from Claude');
+
+    // Parse the JSON response from content
+    const content = responseData.content[0].text;
+    const parsedResponse = JSON.parse(content);
+
+    res.json({
+      success: true,
+      question: parsedResponse.question,
+      answer: parsedResponse.answer,
+      requestId: responseData.id
+    });
+
+  } catch (error) {
+    console.error('[LLM] Error querying Claude:', error);
     res.status(500).json({
       success: false,
       error: error.message
