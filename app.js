@@ -435,200 +435,301 @@ function createFallbackGround() {
     scene.add(gridHelper);
 }
 
-// Main generation pipeline
+// Helper function for parallel API calls
+async function parallelFetch(requests) {
+    return Promise.all(
+        requests.map(async (req) => {
+            try {
+                const response = await fetch(req.url, req.options);
+                const data = await response.json();
+                return { ...data, _requestType: req.type, _requestMeta: req.meta };
+            } catch (error) {
+                console.error(`Error in ${req.type}:`, error);
+                return { success: false, error: error.message, _requestType: req.type, _requestMeta: req.meta };
+            }
+        })
+    );
+}
+
+// Main generation pipeline - PARALLELIZED VERSION
 async function generateAllAssets() {
+    const startTime = Date.now();
+
     try {
-        // Step 1: Generate ground texture
-        updateLoadingUI('🎨 Generating ground texture...', 'Calling FAL AI API');
-        console.log('🎨 Step 1: Generating ground texture...');
+        // ==================== PHASE 1: Ground + Idle Base (Parallel) ====================
+        updateLoadingUI('🚀 Phase 1: Starting parallel generation...', 'Ground texture + Idle character base');
+        console.log('🚀 PHASE 1: Generating ground and idle base in parallel...');
 
-        const groundResponse = await fetch('http://localhost:8081/api/generate-texture', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({})  // Server has default ultra high quality prompt
-        });
+        const phase1Results = await parallelFetch([
+            {
+                type: 'ground',
+                url: 'http://localhost:8081/api/generate-texture',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({})
+                }
+            },
+            {
+                type: 'idle-base',
+                url: 'http://localhost:8081/api/generate-character',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ pose: 'idle' })
+                }
+            }
+        ]);
 
-        const groundData = await groundResponse.json();
+        // Process Phase 1 results
+        const groundData = phase1Results.find(r => r._requestType === 'ground');
+        const idleBaseData = phase1Results.find(r => r._requestType === 'idle-base');
+
         if (!groundData.success) throw new Error(groundData.error || 'Failed to generate ground');
+        if (!idleBaseData.success) throw new Error(idleBaseData.error || 'Failed to generate idle character');
 
-        console.log(`✅ Ground texture ${groundData.cached ? 'loaded from cache' : 'generated'}`);
+        console.log(`✅ Phase 1 complete: Ground ${groundData.cached ? 'cached' : 'generated'}, Idle ${idleBaseData.cached ? 'cached' : 'generated'}`);
 
-        // Load ground texture
-        updateLoadingUI('📥 Loading ground texture...', 'Applying to scene');
-        const groundTexture = await new Promise((resolve, reject) => {
+        // Load and create ground while Phase 2 is running
+        const groundTexturePromise = new Promise((resolve, reject) => {
             textureLoader.load(
-                groundData.imageUrl + '?t=' + Date.now(), // Cache bust
+                groundData.imageUrl + '?t=' + Date.now(),
                 resolve,
                 undefined,
                 reject
             );
         });
 
+        const idleImageUrl = idleBaseData.remoteUrl || idleBaseData.imageUrl;
+
+        // ==================== PHASE 2: Idle Views (5 Parallel) ====================
+        updateLoadingUI('⚡ Phase 2: Generating all idle views...', 'Creating 5 views in parallel');
+        console.log('⚡ PHASE 2: Generating 5 idle views in parallel...');
+
+        const views = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
+        const phase2Requests = views.map(viewName => ({
+            type: 'idle-view',
+            meta: { viewName },
+            url: 'http://localhost:8081/api/generate-view',
+            options: {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    pose: 'idle',
+                    viewName: viewName,
+                    imageUrl: idleImageUrl
+                })
+            }
+        }));
+
+        const phase2Results = await parallelFetch(phase2Requests);
+
+        // Collect idle view URLs in correct order for Trellis
+        const idleViewUrls = [idleImageUrl]; // Start with front
+        const viewOrder = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
+
+        for (const viewName of viewOrder) {
+            const viewResult = phase2Results.find(r => r._requestMeta?.viewName === viewName);
+            if (viewResult?.success) {
+                idleViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+                console.log(`✅ Idle ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
+            } else {
+                console.warn(`⚠️ Failed to generate idle ${viewName} view`);
+            }
+        }
+
+        // Apply ground texture (from Phase 1)
+        const groundTexture = await groundTexturePromise;
         createGround(groundTexture);
 
-        // Step 2: Generate character base image
-        updateLoadingUI('👤 Generating character...', 'Creating base image (1/6)');
-        console.log('👤 Step 2: Generating character...');
+        // ==================== PHASE 3: Idle 3D + Pose Bases (3 Parallel) ====================
+        updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking/Shooting base poses');
+        console.log('🎯 PHASE 3: Generating idle 3D model and other pose bases in parallel...');
 
-        const characterResponse = await fetch('http://localhost:8081/api/generate-character', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pose: 'idle' })
-        });
-
-        const characterData = await characterResponse.json();
-        if (!characterData.success) throw new Error(characterData.error || 'Failed to generate character');
-
-        console.log(`✅ Character ${characterData.cached ? 'loaded from cache' : 'generated'}`);
-        const characterImageUrl = characterData.remoteUrl || characterData.imageUrl;
-
-        // Step 3: Generate angle variations
-        const views = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
-        const viewUrls = [characterImageUrl]; // Start with front view
-
-        for (let i = 0; i < views.length; i++) {
-            const viewName = views[i];
-            updateLoadingUI('👤 Generating character views...', `Creating ${viewName} view (${i + 2}/6)`);
-            console.log(`🔄 Step 3.${i + 1}: Generating ${viewName} view...`);
-
-            // For the Trellis API, we need to use the remote URLs from FAL
-            // So we need to get the remoteUrl from the repose endpoint
-            const reposeResponse = await fetch('http://localhost:8081/api/repose-character', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    imageUrl: characterImageUrl,
-                    viewName: viewName,
-                    pose: 'idle'
-                })
-            });
-
-            const reposeData = await reposeResponse.json();
-            if (!reposeData.success) {
-                console.warn(`⚠️ Failed to generate ${viewName} view, skipping...`);
-                continue;
+        const phase3Results = await parallelFetch([
+            {
+                type: 'idle-3d',
+                url: 'http://localhost:8081/api/generate-3d-model',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        imageUrls: idleViewUrls.slice(0, 6),
+                        pose: 'idle'
+                    })
+                }
+            },
+            {
+                type: 'walking-base',
+                url: 'http://localhost:8081/api/generate-pose',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetPose: 'walking' })
+                }
+            },
+            {
+                type: 'shooting-base',
+                url: 'http://localhost:8081/api/generate-pose',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ targetPose: 'shooting' })
+                }
             }
+        ]);
 
-            console.log(`✅ ${viewName} view ${reposeData.cached ? 'loaded from cache' : 'generated'}`);
-            viewUrls.push(reposeData.remoteUrl || reposeData.imageUrl);
-        }
+        // Process Phase 3 results
+        const idleModelData = phase3Results.find(r => r._requestType === 'idle-3d');
+        const walkingBaseData = phase3Results.find(r => r._requestType === 'walking-base');
+        const shootingBaseData = phase3Results.find(r => r._requestType === 'shooting-base');
 
-        // Step 4: Generate 3D model for idle pose
-        updateLoadingUI('🎲 Generating idle 3D model...', 'Converting images to 3D (1/3)');
-        console.log('🎲 Step 4: Generating idle 3D model from views...');
-
-        const idleModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                imageUrls: viewUrls.slice(0, 6), // Trellis accepts up to 6 images
-                pose: 'idle'
-            })
-        });
-
-        const idleModelData = await idleModelResponse.json();
         if (!idleModelData.success) throw new Error(idleModelData.error || 'Failed to generate idle 3D model');
-        console.log(`✅ Idle 3D model ${idleModelData.cached ? 'loaded from cache' : 'generated'}`);
+        console.log(`✅ Idle 3D model ${idleModelData.cached ? 'cached' : 'generated'}`);
 
-        // Step 5: Generate walking pose from idle
-        updateLoadingUI('🚶 Generating walking pose...', 'Creating walking variations');
-        console.log('🚶 Step 5: Generating walking pose from idle...');
+        const walkingImageUrl = walkingBaseData?.success ? (walkingBaseData.remoteUrl || walkingBaseData.imageUrl) : null;
+        const shootingImageUrl = shootingBaseData?.success ? (shootingBaseData.remoteUrl || shootingBaseData.imageUrl) : null;
 
-        const walkingResponse = await fetch('http://localhost:8081/api/generate-pose', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetPose: 'walking' })
-        });
+        if (walkingImageUrl) console.log(`✅ Walking base ${walkingBaseData.cached ? 'cached' : 'generated'}`);
+        if (shootingImageUrl) console.log(`✅ Shooting base ${shootingBaseData.cached ? 'cached' : 'generated'}`);
 
-        const walkingData = await walkingResponse.json();
-        if (!walkingData.success) {
-            console.warn('⚠️ Failed to generate walking pose, continuing...');
-        } else {
-            console.log(`✅ Walking pose ${walkingData.cached ? 'loaded from cache' : 'generated'}`);
+        // ==================== PHASE 4: All Views + 3D Models (12 Parallel) ====================
+        updateLoadingUI('💥 Phase 4: Final parallel generation...', 'All remaining views and 3D models');
+        console.log('💥 PHASE 4: Generating all remaining views and 3D models in parallel...');
 
-            // Generate 3D model for walking pose
-            updateLoadingUI('🎲 Generating walking 3D model...', 'Converting images to 3D (2/3)');
+        const phase4Requests = [];
 
-            // Use remote URLs from the response
-            const walkingUrls = [];
-            if (walkingData.remoteUrls) {
-                // Order matters for Trellis - front, back, left, right, angle_30, angle_-30
-                const viewOrder = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
-                for (const view of viewOrder) {
-                    if (walkingData.remoteUrls[view]) {
-                        walkingUrls.push(walkingData.remoteUrls[view]);
+        // Add walking view requests if walking base succeeded
+        if (walkingImageUrl) {
+            views.forEach(viewName => {
+                phase4Requests.push({
+                    type: 'walking-view',
+                    meta: { viewName },
+                    url: 'http://localhost:8081/api/generate-view',
+                    options: {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pose: 'walking',
+                            viewName: viewName,
+                            imageUrl: walkingImageUrl
+                        })
+                    }
+                });
+            });
+        }
+
+        // Add shooting view requests if shooting base succeeded
+        if (shootingImageUrl) {
+            views.forEach(viewName => {
+                phase4Requests.push({
+                    type: 'shooting-view',
+                    meta: { viewName },
+                    url: 'http://localhost:8081/api/generate-view',
+                    options: {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            pose: 'shooting',
+                            viewName: viewName,
+                            imageUrl: shootingImageUrl
+                        })
+                    }
+                });
+            });
+        }
+
+        // Execute all Phase 4 view generations in parallel
+        let walkingViewUrls = [];
+        let shootingViewUrls = [];
+
+        if (phase4Requests.length > 0) {
+            const phase4Results = await parallelFetch(phase4Requests);
+
+            // Collect walking view URLs
+            if (walkingImageUrl) {
+                walkingViewUrls = [walkingImageUrl]; // Start with front
+                for (const viewName of viewOrder) {
+                    const viewResult = phase4Results.find(r =>
+                        r._requestType === 'walking-view' && r._requestMeta?.viewName === viewName
+                    );
+                    if (viewResult?.success) {
+                        walkingViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+                        console.log(`✅ Walking ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
                     }
                 }
             }
 
-            const walkingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    imageUrls: walkingUrls,
-                    pose: 'walking'
-                })
-            });
-
-            const walkingModelData = await walkingModelResponse.json();
-            if (walkingModelData.success) {
-                console.log(`✅ Walking 3D model ${walkingModelData.cached ? 'loaded from cache' : 'generated'}`);
-            }
-        }
-
-        // Step 6: Generate shooting pose from idle
-        updateLoadingUI('🔫 Generating shooting pose...', 'Creating shooting variations');
-        console.log('🔫 Step 6: Generating shooting pose from idle...');
-
-        const shootingResponse = await fetch('http://localhost:8081/api/generate-pose', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ targetPose: 'shooting' })
-        });
-
-        const shootingData = await shootingResponse.json();
-        if (!shootingData.success) {
-            console.warn('⚠️ Failed to generate shooting pose, continuing...');
-        } else {
-            console.log(`✅ Shooting pose ${shootingData.cached ? 'loaded from cache' : 'generated'}`);
-
-            // Generate 3D model for shooting pose
-            updateLoadingUI('🎲 Generating shooting 3D model...', 'Converting images to 3D (3/3)');
-
-            // Use remote URLs from the response
-            const shootingUrls = [];
-            if (shootingData.remoteUrls) {
-                // Order matters for Trellis - front, back, left, right, angle_30, angle_-30
-                const viewOrder = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
-                for (const view of viewOrder) {
-                    if (shootingData.remoteUrls[view]) {
-                        shootingUrls.push(shootingData.remoteUrls[view]);
+            // Collect shooting view URLs
+            if (shootingImageUrl) {
+                shootingViewUrls = [shootingImageUrl]; // Start with front
+                for (const viewName of viewOrder) {
+                    const viewResult = phase4Results.find(r =>
+                        r._requestType === 'shooting-view' && r._requestMeta?.viewName === viewName
+                    );
+                    if (viewResult?.success) {
+                        shootingViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+                        console.log(`✅ Shooting ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
                     }
                 }
             }
-
-            const shootingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    imageUrls: shootingUrls,
-                    pose: 'shooting'
-                })
-            });
-
-            const shootingModelData = await shootingModelResponse.json();
-            if (shootingModelData.success) {
-                console.log(`✅ Shooting 3D model ${shootingModelData.cached ? 'loaded from cache' : 'generated'}`);
-            }
         }
 
-        // Step 7: Load the idle 3D model to start
+        // Generate 3D models for walking and shooting in parallel
+        const phase4ModelRequests = [];
+
+        if (walkingViewUrls.length >= 3) {
+            phase4ModelRequests.push({
+                type: 'walking-3d',
+                url: 'http://localhost:8081/api/generate-3d-model',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        imageUrls: walkingViewUrls.slice(0, 6),
+                        pose: 'walking'
+                    })
+                }
+            });
+        }
+
+        if (shootingViewUrls.length >= 3) {
+            phase4ModelRequests.push({
+                type: 'shooting-3d',
+                url: 'http://localhost:8081/api/generate-3d-model',
+                options: {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        imageUrls: shootingViewUrls.slice(0, 6),
+                        pose: 'shooting'
+                    })
+                }
+            });
+        }
+
+        if (phase4ModelRequests.length > 0) {
+            updateLoadingUI('🎲 Finalizing 3D models...', 'Converting walking and shooting poses');
+            const phase4ModelResults = await parallelFetch(phase4ModelRequests);
+
+            phase4ModelResults.forEach(result => {
+                if (result.success) {
+                    const poseType = result._requestType.replace('-3d', '');
+                    console.log(`✅ ${poseType} 3D model ${result.cached ? 'cached' : 'generated'}`);
+                }
+            });
+        }
+
+        // ==================== FINAL: Load Character ====================
         updateLoadingUI('📦 Loading 3D character...', 'Preparing scene');
         await loadCharacterModel(idleModelData.modelUrl + '?t=' + Date.now());
 
+        // Calculate and log total time
+        const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(`🎉 All assets loaded in ${totalTime}s! (Parallel pipeline)`);
+
         // All done!
         loadingElement.classList.add('hidden');
-        console.log('🎉 All assets and poses loaded successfully!');
 
     } catch (error) {
         console.error('❌ Error in generation pipeline:', error);

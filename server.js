@@ -306,19 +306,26 @@ app.post('/api/repose-character', async (req, res) => {
   }
 });
 
-// API endpoint to generate pose variations from idle
+// API endpoint to generate pose base image only (no views)
 app.post('/api/generate-pose', async (req, res) => {
   const { targetPose } = req.body;
 
-  console.log(`[POSE] Generating ${targetPose} pose from idle...`);
+  console.log(`[POSE] Generating ${targetPose} pose base from idle...`);
 
   // Check if target pose assets already exist
   const targetPath = join(CHARACTER_DIR, targetPose, 'front.png');
   if (REUSE_ASSETS && existsSync(targetPath)) {
     console.log(`[REUSE] Reusing existing ${targetPose} pose`);
+
+    // Read the image to get base64 for remoteUrl
+    const imageBuffer = readFileSync(targetPath);
+    const imageBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+
     res.json({
       success: true,
       pose: targetPose,
+      imageUrl: `/assets/character/${targetPose}/front.png`,
+      remoteUrl: imageBase64,  // For cached, return base64 as remote
       cached: true
     });
     return;
@@ -371,7 +378,7 @@ app.post('/api/generate-pose', async (req, res) => {
       },
     });
 
-    console.log(`[OK] ${targetPose} pose generation complete!`);
+    console.log(`[OK] ${targetPose} pose base generation complete!`);
 
     if (result.data && result.data.images && result.data.images.length > 0) {
       const imageUrl = result.data.images[0].url;
@@ -379,50 +386,14 @@ app.post('/api/generate-pose', async (req, res) => {
       // Save the front view of the new pose
       const frontPath = join(CHARACTER_DIR, targetPose, 'front.png');
       await downloadFile(imageUrl, frontPath);
-      console.log(`[SAVED] ${targetPose} front view saved`);
+      console.log(`[SAVED] ${targetPose} base pose saved`);
 
-      // Store remote URLs for all views
-      const remoteUrls = {
-        front: imageUrl  // Store the front view remote URL
-      };
-
-      // Now generate other views for this pose - ultra high quality for 3D reconstruction
-      const views = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
-      const viewPrompts = {
-        'back': `Ultra high quality back view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect rear view for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact pose and proportions`,
-        'left': `Ultra high quality left side profile of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect 90 degree left view for 3D model generation, clean white background, ultra sharp 8K resolution`,
-        'right': `Ultra high quality right side profile of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect 90 degree right view for 3D model generation, clean white background, ultra sharp 8K resolution`,
-        'angle_30': `Ultra high quality three-quarter view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, rotated exactly 30 degrees right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution`,
-        'angle_-30': `Ultra high quality three-quarter view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, rotated exactly 30 degrees left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution`
-      };
-
-      for (const viewName of views) {
-        console.log(`[POSE] Generating ${viewName} view for ${targetPose}...`);
-
-        const viewResult = await fal.subscribe("fal-ai/alpha-image-232/edit-image", {
-          input: {
-            prompt: viewPrompts[viewName],
-            image_urls: [imageUrl]
-          },
-          logs: false
-        });
-
-        if (viewResult.data && viewResult.data.images && viewResult.data.images.length > 0) {
-          const viewImageUrl = viewResult.data.images[0].url;
-          const viewPath = join(CHARACTER_DIR, targetPose, `${viewName}.png`);
-          await downloadFile(viewImageUrl, viewPath);
-          console.log(`[SAVED] ${targetPose} ${viewName} view saved`);
-
-          // Store the remote URL for this view
-          remoteUrls[viewName] = viewImageUrl;
-        }
-      }
-
+      // Return only the base pose image (no views generated here)
       res.json({
         success: true,
         pose: targetPose,
-        frontUrl: `/assets/character/${targetPose}/front.png`,
-        remoteUrls: remoteUrls,  // Return all remote URLs
+        imageUrl: `/assets/character/${targetPose}/front.png`,
+        remoteUrl: imageUrl,  // Return the FAL remote URL
         cached: false
       });
 
@@ -438,6 +409,112 @@ app.post('/api/generate-pose', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message
+    });
+  }
+});
+
+// API endpoint to generate a single view for a pose
+app.post('/api/generate-view', async (req, res) => {
+  const { pose, viewName, imageUrl } = req.body;
+
+  console.log(`[VIEW] Generating ${viewName} view for ${pose} pose...`);
+
+  // Check if view already exists
+  const viewPath = join(CHARACTER_DIR, pose, `${viewName}.png`);
+  if (REUSE_ASSETS && existsSync(viewPath)) {
+    console.log(`[REUSE] Reusing existing ${viewName} view for ${pose}`);
+
+    // Read the image to get base64 for remoteUrl
+    const imageBuffer = readFileSync(viewPath);
+    const imageBase64 = `data:image/png;base64,${imageBuffer.toString('base64')}`;
+
+    res.json({
+      success: true,
+      pose: pose,
+      viewName: viewName,
+      imageUrl: `/assets/character/${pose}/${viewName}.png`,
+      remoteUrl: imageBase64,
+      cached: true
+    });
+    return;
+  }
+
+  // Define prompts for different views - ultra high quality for 3D reconstruction
+  const viewPrompts = {
+    'idle': {
+      'back': 'Ultra high quality back view of exact same character, rear view showing all details, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact proportions and design, no occlusions',
+      'left': 'Ultra high quality left side profile view of exact same character, perfect 90 degree profile from left, optimal for 3D model generation, clean white background, ultra sharp 8K resolution, maintain exact proportions',
+      'right': 'Ultra high quality right side profile view of exact same character, perfect 90 degree profile from right, optimal for 3D model generation, clean white background, ultra sharp 8K resolution, maintain exact proportions',
+      'angle_30': 'Ultra high quality three-quarter view, character rotated exactly 30 degrees to the right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain all details and proportions',
+      'angle_-30': 'Ultra high quality three-quarter view, character rotated exactly 30 degrees to the left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain all details and proportions'
+    },
+    'walking': {
+      'back': 'Ultra high quality back view of character in dynamic walking pose, perfect rear view for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact pose and proportions',
+      'left': 'Ultra high quality left side profile of character in dynamic walking pose, perfect 90 degree left view for 3D model generation, clean white background, ultra sharp 8K resolution',
+      'right': 'Ultra high quality right side profile of character in dynamic walking pose, perfect 90 degree right view for 3D model generation, clean white background, ultra sharp 8K resolution',
+      'angle_30': 'Ultra high quality three-quarter view of character in dynamic walking pose, rotated exactly 30 degrees right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution',
+      'angle_-30': 'Ultra high quality three-quarter view of character in dynamic walking pose, rotated exactly 30 degrees left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution'
+    },
+    'shooting': {
+      'back': 'Ultra high quality back view of character in shooting action pose, perfect rear view for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact pose and proportions',
+      'left': 'Ultra high quality left side profile of character in shooting action pose, perfect 90 degree left view for 3D model generation, clean white background, ultra sharp 8K resolution',
+      'right': 'Ultra high quality right side profile of character in shooting action pose, perfect 90 degree right view for 3D model generation, clean white background, ultra sharp 8K resolution',
+      'angle_30': 'Ultra high quality three-quarter view of character in shooting action pose, rotated exactly 30 degrees right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution',
+      'angle_-30': 'Ultra high quality three-quarter view of character in shooting action pose, rotated exactly 30 degrees left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution'
+    }
+  };
+
+  const prompt = viewPrompts[pose]?.[viewName];
+  if (!prompt) {
+    res.status(400).json({
+      success: false,
+      error: `Unknown view: ${viewName} for pose: ${pose}`
+    });
+    return;
+  }
+
+  try {
+    console.log(`[VIEW] Generating ${viewName} from provided image...`);
+
+    // Generate the view using image-to-image
+    const result = await fal.subscribe("fal-ai/alpha-image-232/edit-image", {
+      input: {
+        prompt: prompt,
+        image_urls: [imageUrl],
+        enable_prompt_expansion: false
+      },
+      logs: false  // Reduce log noise for parallel operations
+    });
+
+    if (result.data && result.data.images && result.data.images.length > 0) {
+      const newImageUrl = result.data.images[0].url;
+
+      // Save the view locally
+      await downloadFile(newImageUrl, viewPath);
+      console.log(`[SAVED] ${pose} ${viewName} view saved`);
+
+      res.json({
+        success: true,
+        pose: pose,
+        viewName: viewName,
+        imageUrl: `/assets/character/${pose}/${viewName}.png`,
+        remoteUrl: newImageUrl,
+        cached: false
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'No images returned from API'
+      });
+    }
+
+  } catch (error) {
+    console.error(`Error generating ${viewName} view for ${pose}:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message,
+      pose: pose,
+      viewName: viewName
     });
   }
 });
