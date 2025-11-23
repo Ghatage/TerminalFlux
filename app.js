@@ -19,114 +19,52 @@
         const camCoords = document.getElementById('terminal-cam-coords');
         const camTargetLabel = document.getElementById('terminal-cam-target');
 
-        // --- MIDI MUSIC PLAYER ---
-        let midiPlayer = null;
-        let audioContext = null;
-        let currentInstrument = null;
+        // --- AUDIO MUSIC PLAYER ---
+        let backgroundMusic = null;
+        let musicStarted = false;
 
-        async function initMusicPlayer() {
+        function initMusicPlayer() {
             try {
-                console.log('[MUSIC] Initializing MIDI player...');
+                console.log('[MUSIC] Initializing audio player...');
 
-                // Create audio context
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                // Create HTML5 Audio element
+                backgroundMusic = new Audio('/assets/music/theme_music.wav');
+                backgroundMusic.loop = true; // Enable looping
+                backgroundMusic.volume = 0.5; // Set volume to 50%
 
-                // Load MIDI file
-                const response = await fetch('/assets/music/theme_music.mid');
-                const arrayBuffer = await response.arrayBuffer();
+                // Try to play immediately
+                backgroundMusic.play().then(() => {
+                    console.log('[MUSIC] Theme music started');
+                    musicStarted = true;
+                }).catch(error => {
+                    console.log('[MUSIC] Autoplay blocked, waiting for user click on terminal screen:', error.message);
 
-                // Parse MIDI
-                const midi = MidiParser.parse(new Uint8Array(arrayBuffer));
-                console.log('[MUSIC] MIDI file loaded and parsed');
+                    // Add click listener to the terminal loading wrapper
+                    const terminalWrapper = document.getElementById('terminal-loading-wrapper');
+                    if (terminalWrapper) {
+                        const startMusicOnClick = () => {
+                            if (!musicStarted) {
+                                backgroundMusic.play().then(() => {
+                                    console.log('[MUSIC] Theme music started after user click');
+                                    musicStarted = true;
+                                }).catch(err => {
+                                    console.error('[MUSIC] Failed to start:', err);
+                                });
+                            }
+                        };
 
-                // Load soundfont instrument (acoustic_grand_piano)
-                currentInstrument = await Soundfont.instrument(audioContext, 'acoustic_grand_piano');
-                console.log('[MUSIC] Soundfont loaded');
-
-                // Start playing
-                playMidiLoop(midi);
-
-            } catch (error) {
-                console.error('[MUSIC] Error loading MIDI:', error);
-            }
-        }
-
-        function playMidiLoop(midi) {
-            if (!midi || !midi.track || !currentInstrument) {
-                console.error('[MUSIC] Invalid MIDI data or instrument not loaded');
-                return;
-            }
-
-            // Combine all tracks
-            const notes = [];
-            midi.track.forEach(track => {
-                let currentTime = 0;
-                track.event.forEach(event => {
-                    currentTime += event.deltaTime;
-                    if (event.type === 9 && event.data[1] > 0) { // Note on
-                        notes.push({
-                            time: currentTime,
-                            note: event.data[0],
-                            velocity: event.data[1],
-                            duration: 500 // Default duration
-                        });
+                        terminalWrapper.addEventListener('click', startMusicOnClick, { once: true });
+                        console.log('[MUSIC] Click anywhere on the terminal screen to start music');
                     }
                 });
-            });
 
-            // Convert MIDI ticks to seconds (assuming 480 ticks per beat, 120 BPM)
-            const ticksPerBeat = midi.timeDivision || 480;
-            const bpm = 120;
-            const secondsPerTick = 60.0 / (bpm * ticksPerBeat);
-
-            // Schedule all notes
-            const startTime = audioContext.currentTime;
-            let maxTime = 0;
-
-            notes.forEach(note => {
-                const time = startTime + (note.time * secondsPerTick);
-                maxTime = Math.max(maxTime, time);
-
-                // Convert MIDI note number to frequency
-                const frequency = 440 * Math.pow(2, (note.note - 69) / 12);
-
-                // Schedule note with soundfont
-                currentInstrument.play(note.note, time, {
-                    duration: note.duration / 1000,
-                    gain: note.velocity / 127
-                });
-            });
-
-            // Schedule loop restart
-            const loopDuration = maxTime - startTime + 1; // Add 1 second buffer
-            setTimeout(() => {
-                console.log('[MUSIC] Looping theme music...');
-                playMidiLoop(midi);
-            }, loopDuration * 1000);
-        }
-
-        // Start music immediately (with user interaction fallback)
-        function startMusic() {
-            if (!midiPlayer) {
-                initMusicPlayer().then(() => {
-                    console.log('[MUSIC] Theme music started');
-                }).catch(err => {
-                    console.error('[MUSIC] Failed to start:', err);
-                });
+            } catch (error) {
+                console.error('[MUSIC] Error initializing audio player:', error);
             }
         }
 
-        // Try to start music immediately
-        startMusic();
-
-        // Also start on first user interaction if autoplay blocked
-        const startOnInteraction = () => {
-            startMusic();
-            document.removeEventListener('click', startOnInteraction);
-            document.removeEventListener('keydown', startOnInteraction);
-        };
-        document.addEventListener('click', startOnInteraction, { once: true });
-        document.addEventListener('keydown', startOnInteraction, { once: true });
+        // Start music immediately when page loads
+        initMusicPlayer();
 
         // --- 3D LIDAR ENGINE SETUP ---
         let points = [];
@@ -433,8 +371,11 @@ const WALL_THICKNESS = 0.5;
 
 // Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x2d1b3d); // Dark purple ominous sky
-scene.fog = new THREE.Fog(0x2d1b3d, 10, 50); // Matching dark purple fog
+scene.background = new THREE.Color(0x1a2a4a); // Dark blue sky
+scene.fog = new THREE.Fog(0x1a2a4a, 10, 50); // Matching dark blue fog
+
+// Cloud system
+let clouds = []; // Store cloud meshes and their animation data
 
 // Camera setup
 const camera = new THREE.PerspectiveCamera(
@@ -1509,6 +1450,91 @@ async function loadNemotronModel() {
             }
         );
     });
+}
+
+// Load and generate clouds in the sky
+async function loadAndGenerateClouds() {
+    console.log('[CLOUDS] Loading cloud model...');
+
+    try {
+        // Load the cloud.glb model
+        const gltf = await new Promise((resolve, reject) => {
+            gltfLoader.load(
+                '/assets/models/cloud.glb',
+                resolve,
+                (progress) => {
+                    console.log('[CLOUDS] Loading progress:', (progress.loaded / progress.total * 100).toFixed(1) + '%');
+                },
+                reject
+            );
+        });
+
+        const cloudTemplate = gltf.scene;
+        console.log('[CLOUDS] Cloud model loaded successfully');
+
+        // Generate 20 cloud instances with random positions and velocities
+        const NUM_CLOUDS = 20;
+        const SKY_HEIGHT_MIN = 20; // Minimum height in sky
+        const SKY_HEIGHT_MAX = 40; // Maximum height in sky
+        const SKY_RADIUS = 60; // Horizontal spread radius
+
+        for (let i = 0; i < NUM_CLOUDS; i++) {
+            // Clone the cloud mesh
+            const cloudMesh = cloudTemplate.clone();
+
+            // Random scale (0.5x to 2.0x)
+            const scale = 0.5 + Math.random() * 1.5;
+            cloudMesh.scale.set(scale, scale, scale);
+
+            // Random position in sky
+            const angle = Math.random() * Math.PI * 2;
+            const radius = Math.random() * SKY_RADIUS;
+            const x = Math.cos(angle) * radius;
+            const z = Math.sin(angle) * radius;
+            const y = SKY_HEIGHT_MIN + Math.random() * (SKY_HEIGHT_MAX - SKY_HEIGHT_MIN);
+
+            cloudMesh.position.set(x, y, z);
+
+            // Random rotation
+            cloudMesh.rotation.y = Math.random() * Math.PI * 2;
+
+            // Enable proper materials (no shadows for clouds - they're in the sky)
+            cloudMesh.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = false;
+                    child.receiveShadow = false;
+
+                    if (child.material) {
+                        if (child.material.map) {
+                            child.material.map.colorSpace = THREE.SRGBColorSpace;
+                        }
+                        child.material.needsUpdate = true;
+                    }
+                }
+            });
+
+            scene.add(cloudMesh);
+
+            // Store cloud with random velocity for animation
+            clouds.push({
+                mesh: cloudMesh,
+                velocity: new THREE.Vector3(
+                    (Math.random() - 0.5) * 0.02, // Slow horizontal drift
+                    (Math.random() - 0.5) * 0.01, // Very slow vertical drift
+                    (Math.random() - 0.5) * 0.02  // Slow horizontal drift
+                ),
+                initialPosition: new THREE.Vector3(x, y, z), // Store initial position for boundary wrapping
+                boundaryRadius: SKY_RADIUS
+            });
+
+            console.log(`[CLOUDS] Placed cloud ${i + 1}/${NUM_CLOUDS} at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z.toFixed(1)})`);
+        }
+
+        console.log('[OK] All clouds loaded and placed in sky!');
+
+    } catch (error) {
+        console.error('[CLOUDS] Error loading cloud model:', error);
+    }
 }
 
 // Generate riddle puzzle with Claude
@@ -2903,6 +2929,12 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         await loadNemotronModel();
         console.log('✅ Altar and Nemotron ready!');
 
+        // ==================== LOAD CLOUDS ====================
+        updateLoadingUI('☁️ Generating clouds...', 'Adding atmosphere to the sky');
+        console.log('☁️ Loading clouds into the sky...');
+        await loadAndGenerateClouds();
+        console.log('✅ Clouds ready!');
+
         // ==================== RIDDLE PUZZLE OBJECTS: Wait for riddle and generate 5 objects in parallel ====================
         updateLoadingUI('🧩 Generating puzzle objects...', 'Creating 5 3D puzzle items in parallel');
         console.log('🧩 RIDDLE: Waiting for riddle generation and creating puzzle objects...');
@@ -3312,6 +3344,27 @@ function animate() {
 
     purpleLight.position.x = Math.cos(time * 0.7) * 5;
     purpleLight.position.z = Math.sin(time * 0.7) * 5;
+
+    // Animate clouds - move them slowly with their random velocities
+    clouds.forEach(cloud => {
+        // Update position based on velocity
+        cloud.mesh.position.add(cloud.velocity);
+
+        // Wrap around boundaries - if cloud moves too far, wrap it to the other side
+        const distanceFromCenter = Math.sqrt(
+            cloud.mesh.position.x * cloud.mesh.position.x +
+            cloud.mesh.position.z * cloud.mesh.position.z
+        );
+
+        if (distanceFromCenter > cloud.boundaryRadius) {
+            // Wrap to opposite side
+            cloud.mesh.position.x = -cloud.mesh.position.x * 0.5;
+            cloud.mesh.position.z = -cloud.mesh.position.z * 0.5;
+        }
+
+        // Slowly rotate clouds for more natural movement
+        cloud.mesh.rotation.y += 0.0005;
+    });
 
     // Check proximity to ALL interactable objects (universal system)
     if (characterModel && gameplayMode) {
@@ -3778,6 +3831,9 @@ async function checkAndLoadSessionAssets(sessionId) {
         // Create altar and load Nemotron model
         createAltar();
         await loadNemotronModel();
+
+        // Load clouds
+        await loadAndGenerateClouds();
 
         // Load riddle puzzle if it exists in session metadata
         console.log('[SESSION] Checking for riddle puzzle...');
