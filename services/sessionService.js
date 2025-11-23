@@ -261,7 +261,8 @@ class SessionService {
             join(sessionPath, 'character', 'walking'),
             join(sessionPath, 'character', 'shooting'),
             join(sessionPath, 'models'),
-            join(sessionPath, 'ground')
+            join(sessionPath, 'ground'),
+            join(sessionPath, 'images')
         ];
 
         directories.forEach(dir => {

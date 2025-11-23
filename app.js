@@ -431,6 +431,72 @@ function createBoundaryWalls() {
     console.log('[OK] All boundary walls created with physics!');
 }
 
+// Create meme poster on wall
+async function createMemePoster(sessionId) {
+    console.log('[POSTER] Generating meme poster...');
+
+    try {
+        // Generate meme image via API
+        const response = await fetch('http://localhost:8081/api/generate-meme', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                prompt: 'Make a funny meme about hackathons',
+                sessionId: sessionId
+            })
+        });
+
+        const data = await response.json();
+        if (!data.success) {
+            console.error('[POSTER] Failed to generate meme:', data.error);
+            return;
+        }
+
+        console.log('[POSTER] Loading meme texture...');
+
+        // Load texture
+        const posterTexture = await new Promise((resolve, reject) => {
+            textureLoader.load(
+                data.imageUrl + '?t=' + Date.now(),
+                resolve,
+                undefined,
+                reject
+            );
+        });
+
+        // Configure texture for poster (no repeat, fit to geometry)
+        posterTexture.colorSpace = THREE.SRGBColorSpace;
+        posterTexture.wrapS = THREE.ClampToEdgeWrapping;
+        posterTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+        // Create poster geometry (3x3 units - readable size)
+        const posterGeometry = new THREE.PlaneGeometry(3, 3);
+
+        // Create poster material (opaque, not transparent)
+        const posterMaterial = new THREE.MeshStandardMaterial({
+            map: posterTexture,
+            roughness: 0.8,
+            metalness: 0.1,
+            side: THREE.FrontSide
+        });
+
+        // Create mesh
+        const posterMesh = new THREE.Mesh(posterGeometry, posterMaterial);
+
+        // Position on South Wall
+        // South Wall is at z: -10 (center at -10, extends from -9.75 to -10.25)
+        // Place poster slightly in front at z: -9.74 to avoid z-fighting
+        posterMesh.position.set(0, 2, -9.74);  // Centered, at eye height, in front of wall
+        posterMesh.rotation.y = 0;  // Face forward (toward camera)
+
+        scene.add(posterMesh);
+
+        console.log('[OK] Meme poster added to South Wall!');
+    } catch (error) {
+        console.error('[POSTER] Error creating poster:', error);
+    }
+}
+
 // Function to load a different pose model (all models are pre-generated at startup)
 async function loadPoseModel(pose) {
     if (pose === currentPose) {
@@ -863,6 +929,9 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
 
         // Create boundary walls
         createBoundaryWalls();
+
+        // Create meme poster on wall
+        await createMemePoster(currentSessionId);
 
         // ==================== PHASE 3: Idle 3D + Pose Bases (2 Parallel) ====================
         updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking base pose');

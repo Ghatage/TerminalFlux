@@ -1033,6 +1033,100 @@ app.post('/api/llm/query', async (req, res) => {
   }
 });
 
+// ==================== MEME GENERATION API ====================
+
+// Generate meme poster
+app.post('/api/generate-meme', async (req, res) => {
+  try {
+    const { prompt, sessionId } = req.body;
+
+    if (!prompt) {
+      return res.status(400).json({
+        success: false,
+        error: 'Prompt is required'
+      });
+    }
+
+    console.log('[MEME] Generating meme poster...');
+
+    // Determine paths based on session or legacy
+    const memePath = sessionId
+      ? getAssetPath(sessionId, 'images', null, 'meme-poster.png')
+      : join(ASSETS_DIR, 'images', 'meme-poster.png');
+
+    const memeUrl = sessionId
+      ? getAssetUrl(sessionId, 'images', null, 'meme-poster.png')
+      : `/assets/images/meme-poster.png`;
+
+    // Check if meme exists (reuse)
+    if (existsSync(memePath)) {
+      console.log('[REUSE] Reusing existing meme poster');
+      res.json({
+        success: true,
+        imageUrl: memeUrl,
+        cached: true
+      });
+      return;
+    }
+
+    // Generate with FAL AI
+    const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
+      input: {
+        prompt: prompt
+      },
+      logs: true,
+      onQueueUpdate: (update) => {
+        if (update.status === "IN_PROGRESS") {
+          update.logs.map((log) => log.message).forEach(console.log);
+        }
+      },
+    });
+
+    console.log('[OK] Meme generation complete!');
+
+    if (result.data && result.data.images && result.data.images.length > 0) {
+      const imageUrl = result.data.images[0].url;
+
+      // Ensure directory exists
+      const memeDir = dirname(memePath);
+      if (!existsSync(memeDir)) {
+        mkdirSync(memeDir, { recursive: true });
+      }
+
+      // Download and save
+      await downloadFile(imageUrl, memePath);
+      console.log('[SAVED] Meme poster saved locally');
+
+      // Record asset in database if session-based
+      if (sessionId) {
+        await sessionService.recordAsset(sessionId, 'images', memePath, {
+          remoteUrl: imageUrl,
+          requestId: result.requestId
+        });
+      }
+
+      res.json({
+        success: true,
+        imageUrl: memeUrl,
+        requestId: result.requestId,
+        cached: false
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'No images returned from API'
+      });
+    }
+
+  } catch (error) {
+    console.error('❌ Error generating meme:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`[SERVER] Server running at http://localhost:${PORT}`);
