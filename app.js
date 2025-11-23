@@ -9,6 +9,8 @@ const world = new CANNON.World({
 });
 world.broadphase = new CANNON.NaiveBroadphase();
 world.solver.iterations = 10;
+world.defaultContactMaterial.contactEquationStiffness = 1e8;
+world.defaultContactMaterial.contactEquationRelaxation = 3;
 
 // Scene setup
 const scene = new THREE.Scene();
@@ -32,6 +34,11 @@ renderer.setPixelRatio(window.devicePixelRatio);
 renderer.shadowMap.enabled = true;
 renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 
+// Critical for proper lighting and colors with GLTF models
+renderer.outputColorSpace = THREE.SRGBColorSpace; // Proper color rendering
+renderer.toneMapping = THREE.ACESFilmicToneMapping; // Better exposure handling
+renderer.toneMappingExposure = 1.1; // Brightness control (0.5 to 2.0 range)
+
 const container = document.getElementById('canvas-container');
 container.appendChild(renderer.domElement);
 
@@ -43,37 +50,39 @@ controls.minDistance = 3;
 controls.maxDistance = 30;
 controls.maxPolarAngle = Math.PI / 2; // Don't let camera go below ground
 
-// Lighting - Multi-directional setup for clear visibility
-const ambientLight = new THREE.AmbientLight(0x606060, 1.5); // Brighter ambient
+// Lighting - Improved setup for GLTF models
+
+// Add HemisphereLight for natural ambient gradient
+const hemisphereLight = new THREE.HemisphereLight(
+    0x87CEEB, // Sky color (light blue)
+    0x444444, // Ground color (dark gray)
+    0.8       // Intensity
+);
+scene.add(hemisphereLight);
+
+// Brighter white ambient light (changed from gray)
+const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // White ambient for better colors
 scene.add(ambientLight);
 
-// Main directional light from top (with shadows)
-const directionalLight = new THREE.DirectionalLight(0xffffff, 1.2);
+// Main directional light (stronger intensity for better visibility)
+const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0); // Increased from 1.2
 directionalLight.position.set(5, 10, 5);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
 directionalLight.shadow.mapSize.height = 2048;
+// Better shadow camera configuration
+directionalLight.shadow.camera.near = 0.1;
+directionalLight.shadow.camera.far = 50;
+directionalLight.shadow.camera.left = -10;
+directionalLight.shadow.camera.right = 10;
+directionalLight.shadow.camera.top = 10;
+directionalLight.shadow.camera.bottom = -10;
 scene.add(directionalLight);
 
-// Front light (from camera direction)
-const frontLight = new THREE.DirectionalLight(0xffffff, 0.8);
-frontLight.position.set(0, 2, 10);
-scene.add(frontLight);
-
-// Back light
-const backLight = new THREE.DirectionalLight(0xffffff, 0.6);
-backLight.position.set(0, 2, -10);
-scene.add(backLight);
-
-// Left side light
-const leftLight = new THREE.DirectionalLight(0xffffff, 0.6);
-leftLight.position.set(-10, 2, 0);
-scene.add(leftLight);
-
-// Right side light
-const rightLight = new THREE.DirectionalLight(0xffffff, 0.6);
-rightLight.position.set(10, 2, 0);
-scene.add(rightLight);
+// Single fill light instead of multiple directions (prevents washing out)
+const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+fillLight.position.set(-3, 5, 2);
+scene.add(fillLight);
 
 // Add some colored accent lights for sci-fi effect (animated)
 const blueLight = new THREE.PointLight(0x00d4ff, 1.5, 20);
@@ -92,8 +101,13 @@ const loadingElement = document.getElementById('loading');
 // Ground plane and character model
 let groundMesh;
 let groundBody;
+let groundMaterial; // Store ground material globally
 let characterModel;
 let characterBody;
+
+// Physics visualization helpers
+let characterBoxHelper;
+let groundBoxHelper;
 
 // Function to update loading UI
 function updateLoadingUI(message, submessage = '', showSpinner = true) {
@@ -116,7 +130,7 @@ function createGround(texture) {
     const groundGeometry = new THREE.PlaneGeometry(20, 20, 100, 100);
 
     // Create material with the texture
-    const groundMaterial = new THREE.MeshStandardMaterial({
+    const groundMeshMaterial = new THREE.MeshStandardMaterial({
         map: texture,
         roughness: 0.7,
         metalness: 0.3,
@@ -124,7 +138,7 @@ function createGround(texture) {
     });
 
     // Create mesh
-    groundMesh = new THREE.Mesh(groundGeometry, groundMaterial);
+    groundMesh = new THREE.Mesh(groundGeometry, groundMeshMaterial);
     groundMesh.rotation.x = -Math.PI / 2; // Rotate to be horizontal
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
@@ -135,12 +149,25 @@ function createGround(texture) {
     scene.add(gridHelper);
 
     // Create physics body for ground (infinite static plane)
+    groundMaterial = new CANNON.Material('ground');
     groundBody = new CANNON.Body({
         mass: 0, // mass = 0 makes it static
-        shape: new CANNON.Plane()
+        shape: new CANNON.Plane(),
+        material: groundMaterial
     });
     groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0); // Rotate to be horizontal
     world.addBody(groundBody);
+
+    // Create a visual bounding box for the ground (shows the collision area)
+    const groundBoxGeometry = new THREE.BoxGeometry(20, 0.1, 20); // Thin box for ground
+    const groundBoxEdges = new THREE.EdgesGeometry(groundBoxGeometry);
+    groundBoxHelper = new THREE.LineSegments(
+        groundBoxEdges,
+        new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 })
+    );
+    groundBoxHelper.position.y = -0.05; // Position just below ground surface
+    groundBoxHelper.visible = false; // Initially hidden
+    scene.add(groundBoxHelper);
 
     console.log('[OK] Ground created successfully with physics!');
 }
@@ -170,11 +197,25 @@ function loadCharacterModel(modelUrl) {
                 // No rotation needed - character spawns in natural orientation
                 // Forward direction (yellow arrow) points toward initial camera position
 
-                // Enable shadows
+                // Enable shadows and fix material color spaces
                 characterModel.traverse((child) => {
                     if (child.isMesh) {
                         child.castShadow = true;
                         child.receiveShadow = true;
+
+                        // Ensure materials are properly configured for lighting
+                        if (child.material) {
+                            // Ensure proper color space for any textures
+                            if (child.material.map) {
+                                child.material.map.colorSpace = THREE.SRGBColorSpace;
+                            }
+                            if (child.material.emissiveMap) {
+                                child.material.emissiveMap.colorSpace = THREE.SRGBColorSpace;
+                            }
+
+                            // Ensure material updates with new settings
+                            child.material.needsUpdate = true;
+                        }
                     }
                 });
 
@@ -203,6 +244,7 @@ function loadCharacterModel(modelUrl) {
                 characterModel.userData.axesHelper = axesHelper;
                 characterModel.userData.arrowHelper = arrowHelper;
                 characterModel.userData.modelHeight = scaledSize.y;
+                characterModel.userData.halfHeight = scaledSize.y / 2; // Store half height for offset
 
                 // Create physics body for character
                 const halfExtents = new CANNON.Vec3(
@@ -211,17 +253,54 @@ function loadCharacterModel(modelUrl) {
                     scaledSize.z / 2
                 );
                 const characterShape = new CANNON.Box(halfExtents);
+
+                // Create body without shape first
                 characterBody = new CANNON.Body({
                     mass: 5, // 5kg mass
-                    shape: characterShape,
                     position: new CANNON.Vec3(0, 5, 0), // Start above ground
                     linearDamping: 0.0, // No damping for snappy movement controls
-                    angularDamping: 0.9 // Prevent spinning
+                    angularDamping: 0.9, // Prevent spinning
+                    material: new CANNON.Material('character')
                 });
+
+                // Add shape with offset so the collision box center is at the bottom of the character
+                // This means offsetting it up by half the character's height
+                const shapeOffset = new CANNON.Vec3(0, scaledSize.y / 2, 0);
+                characterBody.addShape(characterShape, shapeOffset);
 
                 // No initial rotation needed - physics body matches visual model orientation
 
                 world.addBody(characterBody);
+
+                // Create contact material between character and ground
+                const characterGroundContact = new CANNON.ContactMaterial(
+                    characterBody.material,
+                    groundMaterial,
+                    {
+                        friction: 0.4,
+                        restitution: 0.0, // No bouncing
+                        contactEquationStiffness: 1e8,
+                        contactEquationRelaxation: 3
+                    }
+                );
+                world.addContactMaterial(characterGroundContact);
+
+                // Create a visual bounding box for the character
+                const characterBoxGeometry = new THREE.BoxGeometry(
+                    scaledSize.x,
+                    scaledSize.y,
+                    scaledSize.z
+                );
+                const characterBoxEdges = new THREE.EdgesGeometry(characterBoxGeometry);
+                characterBoxHelper = new THREE.LineSegments(
+                    characterBoxEdges,
+                    new THREE.LineBasicMaterial({ color: 0xff00ff, linewidth: 2 }) // Magenta for character
+                );
+                characterBoxHelper.visible = false; // Initially hidden
+                scene.add(characterBoxHelper);
+
+                // Store reference to box helper in character userData
+                characterModel.userData.boxHelper = characterBoxHelper;
 
                 console.log('[OK] Character model loaded with physics!');
                 resolve(characterModel);
@@ -240,13 +319,13 @@ function loadCharacterModel(modelUrl) {
 
 // Create a fallback ground with a default material
 function createFallbackGround() {
-    const fallbackMaterial = new THREE.MeshStandardMaterial({
+    const fallbackMeshMaterial = new THREE.MeshStandardMaterial({
         color: 0x333333,
         roughness: 0.8,
         metalness: 0.2
     });
     const groundGeometry = new THREE.PlaneGeometry(20, 20, 100, 100);
-    groundMesh = new THREE.Mesh(groundGeometry, fallbackMaterial);
+    groundMesh = new THREE.Mesh(groundGeometry, fallbackMeshMaterial);
     groundMesh.rotation.x = -Math.PI / 2;
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
@@ -395,8 +474,8 @@ const CAMERA_LERP_FACTOR = 0.1; // Smooth camera follow speed
 // Helper function to check if character is on ground
 function isGrounded() {
     if (!characterBody) return false;
-    // Character is grounded if it's close to ground level and not moving up
-    return Math.abs(characterBody.position.y - 1) < 0.2 && Math.abs(characterBody.velocity.y) < 0.5;
+    // Character is grounded if the physics body (which is now at the bottom) is close to ground level
+    return Math.abs(characterBody.position.y) < 0.2 && Math.abs(characterBody.velocity.y) < 0.5;
 }
 
 // Animation loop
@@ -454,9 +533,11 @@ function animate() {
         }
 
         // Sync Three.js model position with physics body
+        // The physics body is at the character's feet, but the visual model's origin is at its center
+        // So we need to offset the visual model up by half its height
         characterModel.position.copy(characterBody.position);
+        characterModel.position.y = characterBody.position.y + (characterModel.userData.halfHeight || 0);
         // Don't sync quaternion - we're handling rotation manually for Y axis
-        characterModel.position.y = characterBody.position.y;
 
         // Camera follows character using the saved camera offset from setup
         // This maintains the exact camera angle you had when you pressed S
@@ -481,7 +562,7 @@ function animate() {
     // In setup mode, keep model synced with physics position
     if (characterModel && characterBody && !gameplayMode) {
         characterModel.position.copy(characterBody.position);
-        characterModel.position.y = characterBody.position.y;
+        characterModel.position.y = characterBody.position.y + (characterModel.userData.halfHeight || 0);
     }
 
     // Update helper positions to follow character (but keep fixed orientation)
@@ -492,6 +573,15 @@ function animate() {
         // Arrow helper follows character position at correct height
         characterModel.userData.arrowHelper.position.copy(characterModel.position);
         characterModel.userData.arrowHelper.position.y += characterModel.userData.modelHeight / 2;
+    }
+
+    // Update physics bounding box position to follow character
+    if (characterModel && characterModel.userData.boxHelper) {
+        // The box helper should be centered on the character visual model
+        // which is already offset up from the physics body position
+        characterModel.userData.boxHelper.position.copy(characterModel.position);
+        // Match the character's rotation for the bounding box
+        characterModel.userData.boxHelper.rotation.copy(characterModel.rotation);
     }
 
     // Animate the colored lights
@@ -672,8 +762,15 @@ window.addEventListener('keydown', (event) => {
             characterModel.userData.axesHelper.visible = helpersVisible;
             characterModel.userData.arrowHelper.visible = helpersVisible;
         }
+        // Also toggle physics bounding boxes with H key
+        if (characterModel && characterModel.userData.boxHelper) {
+            characterModel.userData.boxHelper.visible = helpersVisible;
+        }
+        if (groundBoxHelper) {
+            groundBoxHelper.visible = helpersVisible;
+        }
         document.getElementById('helpers-visible').textContent = helpersVisible ? 'Yes' : 'No';
-        console.log(`[DEBUG] Helpers ${helpersVisible ? 'shown' : 'hidden'}`);
+        console.log(`[DEBUG] Helpers and physics boxes ${helpersVisible ? 'shown' : 'hidden'}`);
     }
 
     // I - Toggle ALL UI and helpers (works in both modes)
@@ -694,11 +791,19 @@ window.addEventListener('keydown', (event) => {
             characterModel.userData.arrowHelper.visible = debugInfoVisible;
         }
 
+        // Toggle physics bounding boxes
+        if (characterModel && characterModel.userData.boxHelper) {
+            characterModel.userData.boxHelper.visible = debugInfoVisible;
+        }
+        if (groundBoxHelper) {
+            groundBoxHelper.visible = debugInfoVisible;
+        }
+
         // Update helpers visible status
         helpersVisible = debugInfoVisible;
         document.getElementById('helpers-visible').textContent = helpersVisible ? 'Yes' : 'No';
 
-        console.log(`[DEBUG] All UI and helpers ${debugInfoVisible ? 'shown' : 'hidden'}`);
+        console.log(`[DEBUG] All UI, helpers, and physics boxes ${debugInfoVisible ? 'shown' : 'hidden'}`);
     }
 });
 
