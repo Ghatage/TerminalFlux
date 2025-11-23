@@ -12,6 +12,11 @@ world.solver.iterations = 10;
 world.defaultContactMaterial.contactEquationStiffness = 1e8;
 world.defaultContactMaterial.contactEquationRelaxation = 3;
 
+// Wall configuration
+const GROUND_SIZE = 20;
+const WALL_HEIGHT = 4;
+const WALL_THICKNESS = 0.5;
+
 // Scene setup
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87CEEB); // Light blue sky background
@@ -149,6 +154,10 @@ let userCharacter = 'sci-fi robot warrior'; // Default fallback
 let userModelType = 'trellis'; // Default to Trellis
 let userPlayerMode = 1; // Default to single player
 
+// Session management
+let currentSessionId = null;
+let currentSession = null;
+
 // Ground plane and character model
 let groundMesh;
 let groundBody;
@@ -161,17 +170,37 @@ let currentPose = 'idle'; // Track current pose
 let characterBoxHelper;
 let groundBoxHelper;
 
+// Boundary walls
+let boundaryWalls = [];
+let wallBodies = [];
+let wallHelpers = [];
+
 // Store generated images for display
 const generatedImages = [];
 
 // Function to update loading UI
 function updateLoadingUI(message, submessage = '', showSpinner = true) {
-    const loadingContent = loadingElement.querySelector('div:first-child') || loadingElement;
-    loadingContent.innerHTML = `
-        ${showSpinner ? '<div class="spinner"></div>' : ''}
-        <p>${message}</p>
-        ${submessage ? `<p style="font-size: 14px; margin-top: 10px;">${submessage}</p>` : ''}
-    `;
+    // Update only the text content, not the structure
+    const spinnerContainer = document.getElementById('loading-spinner-container');
+    const messageElement = document.getElementById('loading-message');
+    const submessageElement = document.getElementById('loading-submessage');
+
+    if (spinnerContainer) {
+        spinnerContainer.style.display = showSpinner ? 'flex' : 'none';
+    }
+
+    if (messageElement) {
+        messageElement.textContent = message;
+    }
+
+    if (submessageElement) {
+        if (submessage) {
+            submessageElement.textContent = submessage;
+            submessageElement.style.display = 'block';
+        } else {
+            submessageElement.style.display = 'none';
+        }
+    }
 }
 
 // Function to add image to gallery
@@ -293,10 +322,10 @@ function createGround(texture) {
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
-    // Add a subtle grid helper for reference
-    const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x444444);
-    gridHelper.position.y = 0.01; // Slightly above ground
-    scene.add(gridHelper);
+    // Grid helper disabled - no gridlines on ground
+    // const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x444444);
+    // gridHelper.position.y = 0.01; // Slightly above ground
+    // scene.add(gridHelper);
 
     // Create physics body for ground (infinite static plane)
     groundMaterial = new CANNON.Material('ground');
@@ -322,6 +351,85 @@ function createGround(texture) {
     console.log('[OK] Ground created successfully with physics!');
 }
 
+// Create boundary walls around the ground
+function createBoundaryWalls() {
+    // Wall configurations: [name, position, halfExtents]
+    const walls = [
+        {
+            name: 'North Wall',
+            position: { x: 0, y: WALL_HEIGHT / 2, z: GROUND_SIZE / 2 },
+            halfExtents: new CANNON.Vec3(GROUND_SIZE / 2, WALL_HEIGHT / 2, WALL_THICKNESS / 2),
+            dimensions: { width: GROUND_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS }
+        },
+        {
+            name: 'South Wall',
+            position: { x: 0, y: WALL_HEIGHT / 2, z: -GROUND_SIZE / 2 },
+            halfExtents: new CANNON.Vec3(GROUND_SIZE / 2, WALL_HEIGHT / 2, WALL_THICKNESS / 2),
+            dimensions: { width: GROUND_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS }
+        },
+        {
+            name: 'East Wall',
+            position: { x: GROUND_SIZE / 2, y: WALL_HEIGHT / 2, z: 0 },
+            halfExtents: new CANNON.Vec3(WALL_THICKNESS / 2, WALL_HEIGHT / 2, GROUND_SIZE / 2),
+            dimensions: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: GROUND_SIZE }
+        },
+        {
+            name: 'West Wall',
+            position: { x: -GROUND_SIZE / 2, y: WALL_HEIGHT / 2, z: 0 },
+            halfExtents: new CANNON.Vec3(WALL_THICKNESS / 2, WALL_HEIGHT / 2, GROUND_SIZE / 2),
+            dimensions: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: GROUND_SIZE }
+        }
+    ];
+
+    walls.forEach(wall => {
+        // Create visual mesh
+        const wallGeometry = new THREE.BoxGeometry(
+            wall.dimensions.width,
+            wall.dimensions.height,
+            wall.dimensions.depth
+        );
+        const wallMaterial = new THREE.MeshStandardMaterial({
+            color: 0x666666,
+            roughness: 0.7,
+            metalness: 0.3,
+            transparent: true,
+            opacity: 0.3,
+            side: THREE.DoubleSide
+        });
+        const wallMesh = new THREE.Mesh(wallGeometry, wallMaterial);
+        wallMesh.position.set(wall.position.x, wall.position.y, wall.position.z);
+        wallMesh.castShadow = true;
+        wallMesh.receiveShadow = true;
+        scene.add(wallMesh);
+        boundaryWalls.push(wallMesh);
+
+        // Create physics body
+        const wallBody = new CANNON.Body({
+            mass: 0, // Static body
+            shape: new CANNON.Box(wall.halfExtents),
+            material: groundMaterial // Reuse ground material
+        });
+        wallBody.position.set(wall.position.x, wall.position.y, wall.position.z);
+        world.addBody(wallBody);
+        wallBodies.push(wallBody);
+
+        // Create visual helper for debugging
+        const wallBoxEdges = new THREE.EdgesGeometry(wallGeometry);
+        const wallHelper = new THREE.LineSegments(
+            wallBoxEdges,
+            new THREE.LineBasicMaterial({ color: 0xffff00, linewidth: 2 }) // Yellow for walls
+        );
+        wallHelper.position.set(wall.position.x, wall.position.y, wall.position.z);
+        wallHelper.visible = false; // Initially hidden
+        scene.add(wallHelper);
+        wallHelpers.push(wallHelper);
+
+        console.log(`[OK] ${wall.name} created at (${wall.position.x}, ${wall.position.y}, ${wall.position.z})`);
+    });
+
+    console.log('[OK] All boundary walls created with physics!');
+}
+
 // Function to load a different pose model (all models are pre-generated at startup)
 async function loadPoseModel(pose) {
     if (pose === currentPose) {
@@ -333,7 +441,10 @@ async function loadPoseModel(pose) {
 
     try {
         // Check if pose model exists (should always exist after startup generation)
-        const checkResponse = await fetch(`http://localhost:8081/assets/models/character_${pose}.glb`);
+        const modelPath = currentSessionId
+            ? `/assets/${currentSessionId}/models/character_${pose}.glb`
+            : `/assets/models/character_${pose}.glb`;
+        const checkResponse = await fetch(`http://localhost:8081${modelPath}`);
 
         if (!checkResponse.ok) {
             console.error(`[POSE] ${pose} model not found! It should have been generated at startup.`);
@@ -401,8 +512,11 @@ async function loadPoseModel(pose) {
             world.removeBody(characterBody);
         }
 
-        // Load the new model
-        await loadCharacterModel(`/assets/models/character_${pose}.glb?t=${Date.now()}`);
+        // Load the new model (use session-specific path if session is active)
+        const modelUrl = currentSessionId
+            ? `/assets/${currentSessionId}/models/character_${pose}.glb`
+            : `/assets/models/character_${pose}.glb`;
+        await loadCharacterModel(`${modelUrl}?t=${Date.now()}`);
 
         // Restore physics position and velocity after loading new model
         if (savedPosition && characterBody) {
@@ -588,10 +702,10 @@ function createFallbackGround() {
     groundMesh.receiveShadow = true;
     scene.add(groundMesh);
 
-    // Add grid helper
-    const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x444444);
-    gridHelper.position.y = 0.01;
-    scene.add(gridHelper);
+    // Grid helper disabled in fallback ground as well
+    // const gridHelper = new THREE.GridHelper(20, 20, 0x00d4ff, 0x444444);
+    // gridHelper.position.y = 0.01;
+    // scene.add(gridHelper);
 }
 
 // Helper function for parallel API calls
@@ -627,7 +741,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({})
+                    body: JSON.stringify({ sessionId: currentSessionId })
                 }
             },
             {
@@ -636,7 +750,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pose: 'idle', character: character })
+                    body: JSON.stringify({ pose: 'idle', character: character, sessionId: currentSessionId })
                 }
             }
         ]);
@@ -688,7 +802,8 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                 body: JSON.stringify({
                     pose: 'idle',
                     viewName: viewName,
-                    imageUrl: idleImageUrl
+                    imageUrl: idleImageUrl,
+                    sessionId: currentSessionId
                 })
             }
         }));
@@ -717,6 +832,9 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         const groundTexture = await groundTexturePromise;
         createGround(groundTexture);
 
+        // Create boundary walls
+        createBoundaryWalls();
+
         // ==================== PHASE 3: Idle 3D + Pose Bases (2 Parallel) ====================
         updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking base pose');
         console.log('🎯 PHASE 3: Generating idle 3D model and walking pose base in parallel...');
@@ -731,7 +849,8 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                     body: JSON.stringify({
                         imageUrls: userModelType === 'trellis' ? idleViewUrls.slice(0, 6) : idleViewUrls.slice(0, 5),  // Trellis supports 6, Rodin supports 5
                         pose: 'idle',
-                        modelType: userModelType  // Pass selected model type
+                        modelType: userModelType,  // Pass selected model type
+                        sessionId: currentSessionId  // Pass session ID for proper asset storage
                     })
                 }
             },
@@ -741,7 +860,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ targetPose: 'walking' })
+                    body: JSON.stringify({ targetPose: 'walking', sessionId: currentSessionId })
                 }
             }
             // SHOOTING POSE GENERATION DISABLED
@@ -794,7 +913,8 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                         body: JSON.stringify({
                             pose: 'walking',
                             viewName: viewName,
-                            imageUrl: walkingImageUrl
+                            imageUrl: walkingImageUrl,
+                            sessionId: currentSessionId
                         })
                     }
                 });
@@ -876,7 +996,8 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                     body: JSON.stringify({
                         imageUrls: userModelType === 'trellis' ? walkingViewUrls.slice(0, 6) : walkingViewUrls.slice(0, 5),  // Trellis supports 6, Rodin supports 5
                         pose: 'walking',
-                        modelType: userModelType  // Pass selected model type
+                        modelType: userModelType,  // Pass selected model type
+                        sessionId: currentSessionId  // Pass session ID for proper asset storage
                     })
                 }
             });
@@ -964,7 +1085,7 @@ const CAMERA_LERP_FACTOR = 0.1; // Smooth camera follow speed
 
 // Auto-swap pose tracking
 let lastPoseSwapTime = 0;
-const POSE_SWAP_INTERVAL = 500; // 0.5 seconds in milliseconds
+const POSE_SWAP_INTERVAL = 250; // 0.25 seconds in milliseconds (doubled speed from 500ms)
 let isAutoSwapping = false;
 let lastMovementState = false;
 
@@ -1328,6 +1449,10 @@ window.addEventListener('keydown', (event) => {
         if (groundBoxHelper) {
             groundBoxHelper.visible = helpersVisible;
         }
+        // Toggle wall helpers
+        wallHelpers.forEach(helper => {
+            helper.visible = helpersVisible;
+        });
         document.getElementById('helpers-visible').textContent = helpersVisible ? 'Yes' : 'No';
         console.log(`[DEBUG] Helpers and physics boxes ${helpersVisible ? 'shown' : 'hidden'}`);
     }
@@ -1357,6 +1482,10 @@ window.addEventListener('keydown', (event) => {
         if (groundBoxHelper) {
             groundBoxHelper.visible = debugInfoVisible;
         }
+        // Toggle wall helpers
+        wallHelpers.forEach(helper => {
+            helper.visible = debugInfoVisible;
+        });
 
         // Update helpers visible status
         helpersVisible = debugInfoVisible;
@@ -1378,41 +1507,263 @@ window.addEventListener('keydown', (event) => {
     // }
 });
 
-// Initialize the app with character selection
-async function initializeApp() {
-    // First check if we're in reuse mode and have assets
+// Session management functions
+async function loadSessions() {
     try {
-        const response = await fetch('http://localhost:8081/api/check-assets');
-        const assetStatus = await response.json();
-
-        console.log('Asset status:', assetStatus);
-
-        // If reuse is enabled and all assets exist, skip the modal
-        if (assetStatus.reuseEnabled && assetStatus.allExist) {
-            console.log('[REUSE] All assets exist, skipping character selection');
-            characterModal.classList.add('hidden');
-            loadingElement.classList.remove('hidden');
-            loadingElement.style.display = ''; // Ensure it's visible
-            generateAllAssets(userCharacter); // Use default character
-        } else {
-            // Show the character selection modal
-            console.log('Showing character selection modal');
-            characterModal.classList.remove('hidden');
-            loadingElement.classList.add('hidden');
-
-            // Focus on the input field
-            characterInput.focus();
+        const response = await fetch('http://localhost:8081/api/sessions');
+        const data = await response.json();
+        if (data.success) {
+            return data.sessions;
         }
     } catch (error) {
-        console.error('Error checking asset status:', error);
-        // Show modal as fallback
-        characterModal.classList.remove('hidden');
+        console.error('Error loading sessions:', error);
+    }
+    return [];
+}
+
+async function createSession(character, modelType, playerMode) {
+    try {
+        const response = await fetch('http://localhost:8081/api/sessions/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ character, modelType, playerMode })
+        });
+        const data = await response.json();
+        if (data.success) {
+            return data.session;
+        }
+    } catch (error) {
+        console.error('Error creating session:', error);
+    }
+    return null;
+}
+
+async function loadSession(sessionId) {
+    try {
+        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}`);
+        const data = await response.json();
+        if (data.success) {
+            return data.session;
+        }
+    } catch (error) {
+        console.error('Error loading session:', error);
+    }
+    return null;
+}
+
+async function deleteSession(sessionId) {
+    try {
+        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}`, {
+            method: 'DELETE'
+        });
+        const data = await response.json();
+        return data.success;
+    } catch (error) {
+        console.error('Error deleting session:', error);
+    }
+    return false;
+}
+
+// Check if session assets exist and load them directly
+async function checkAndLoadSessionAssets(sessionId) {
+    try {
+        console.log(`[SESSION] Checking assets for session: ${sessionId}`);
+
+        // Check if session assets exist
+        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}/assets`);
+        const data = await response.json();
+
+        if (!data.success || !data.assets || data.assets.length === 0) {
+            console.log('[SESSION] No assets found for session');
+            return false;
+        }
+
+        console.log(`[SESSION] Found ${data.assets.length} assets in database`);
+        console.log('[SESSION] Asset types:', [...new Set(data.assets.map(a => a.asset_type))]);
+
+        // Check for minimum required assets to load the game
+        const hasGround = data.assets.some(a => a.asset_type === 'ground');
+        // Check if idle model exists in the file system (not database, since models aren't recorded yet)
+        const modelPath = `/assets/${sessionId}/models/character_idle.glb`;
+        const modelCheckResponse = await fetch(`http://localhost:8081${modelPath}`, { method: 'HEAD' });
+        const hasIdleModel = modelCheckResponse.ok;
+
+        console.log(`[SESSION] Has ground texture: ${hasGround}`);
+        console.log(`[SESSION] Has idle model at ${modelPath}: ${hasIdleModel}`);
+
+        if (!hasGround || !hasIdleModel) {
+            console.log('[SESSION] Missing required assets - will regenerate');
+            return false;
+        }
+
+        console.log(`[SESSION] Found ${data.assets.length} assets, loading directly...`);
+
+        // Load ground texture directly
+        const groundTexturePath = `/assets/${sessionId}/ground/ground-texture.png`;
+        const groundTexture = await new Promise((resolve, reject) => {
+            textureLoader.load(
+                groundTexturePath + '?t=' + Date.now(),
+                resolve,
+                undefined,
+                reject
+            );
+        });
+        createGround(groundTexture);
+        console.log('[SESSION] Loaded ground texture from disk');
+
+        // Create boundary walls
+        createBoundaryWalls();
+
+        // Load the idle model directly
+        await loadCharacterModel(modelPath + '?t=' + Date.now());
+        console.log('[SESSION] Loaded character model from disk');
+
+        // Hide loading modal immediately - no generation needed
         loadingElement.classList.add('hidden');
+        loadingElement.style.display = 'none';
+
+        console.log('✅ Session assets loaded successfully from disk');
+        return true;
+
+    } catch (error) {
+        console.error('[SESSION] Error checking/loading assets:', error);
+        return false;
     }
 }
 
+function displaySessionList(sessions) {
+    const sessionList = document.getElementById('session-list');
+
+    if (sessions.length === 0) {
+        sessionList.innerHTML = '<p style="text-align: center; color: #888;">No existing sessions. Start a new adventure!</p>';
+        return;
+    }
+
+    sessionList.innerHTML = sessions.map(session => {
+        const date = new Date(session.last_accessed);
+        const dateStr = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+
+        return `
+            <div class="session-item" data-session-id="${session.id}">
+                <div class="session-item-header">
+                    <div class="session-character">${session.character_description}</div>
+                    <button class="delete-session-btn" data-session-id="${session.id}">Delete</button>
+                </div>
+                <div class="session-details">
+                    <span>Model: ${session.model_type}</span>
+                    <span>Players: ${session.player_mode}</span>
+                </div>
+                <div class="session-date">Last played: ${dateStr}</div>
+                <div class="session-uuid">ID: ${session.id}</div>
+            </div>
+        `;
+    }).join('');
+
+    // Add click handlers for session items
+    document.querySelectorAll('.session-item').forEach(item => {
+        item.addEventListener('click', async (e) => {
+            // Don't trigger if clicking the delete button
+            if (e.target.classList.contains('delete-session-btn')) return;
+
+            const sessionId = item.dataset.sessionId;
+            await startSessionGame(sessionId);
+        });
+    });
+
+    // Add click handlers for delete buttons
+    document.querySelectorAll('.delete-session-btn').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            const sessionId = btn.dataset.sessionId;
+            if (confirm('Are you sure you want to delete this session?')) {
+                if (await deleteSession(sessionId)) {
+                    // Reload session list
+                    const sessions = await loadSessions();
+                    displaySessionList(sessions);
+                }
+            }
+        });
+    });
+}
+
+async function startSessionGame(sessionId) {
+    // Load session details
+    const session = await loadSession(sessionId);
+    if (!session) {
+        console.error('Failed to load session');
+        return;
+    }
+
+    // Set current session
+    currentSessionId = sessionId;
+    currentSession = session;
+    userCharacter = session.character_description;
+    userModelType = session.model_type;
+    userPlayerMode = session.player_mode;
+
+    // Update UI with session ID
+    document.getElementById('session-uuid').textContent = sessionId;
+
+    // Hide session modal with explicit display none
+    const sessionModal = document.getElementById('session-modal');
+    sessionModal.classList.add('hidden');
+    sessionModal.style.display = 'none';
+
+    // Ensure character modal is also hidden
+    characterModal.classList.add('hidden');
+    characterModal.style.display = 'none';
+
+    console.log('[SESSION] Starting session game:', sessionId);
+
+    // CRITICAL: Check if assets already exist and load them directly
+    const assetsLoaded = await checkAndLoadSessionAssets(sessionId);
+
+    if (assetsLoaded) {
+        console.log('✅ Session loaded from disk - no generation needed!');
+        // Assets loaded successfully, game is ready to play
+        // No loading modal was shown, no generation happened
+        return;
+    }
+
+    // Only show loading modal and generate if assets don't exist
+    console.log('📦 Session assets not found, generating new assets...');
+    loadingElement.classList.remove('hidden');
+    loadingElement.style.display = '';
+
+    // Start generation with session ID
+    generateAllAssets(userCharacter);
+}
+
+// Initialize the app with session selection
+async function initializeApp() {
+    // Load existing sessions
+    const sessions = await loadSessions();
+    displaySessionList(sessions);
+
+    // Add handler for new session button
+    const newSessionBtn = document.getElementById('new-session-btn');
+    newSessionBtn.addEventListener('click', () => {
+        // Hide session modal with explicit display none
+        const sessionModal = document.getElementById('session-modal');
+        sessionModal.classList.add('hidden');
+        sessionModal.style.display = 'none';
+
+        // Show character selection modal
+        characterModal.classList.remove('hidden');
+        characterModal.style.display = '';
+
+        // Focus on the input field
+        characterInput.focus();
+    });
+
+    // Show session modal initially
+    document.getElementById('session-modal').classList.remove('hidden');
+    characterModal.classList.add('hidden');
+    loadingElement.classList.add('hidden');
+}
+
 // Handle character submission
-characterSubmit.addEventListener('click', () => {
+characterSubmit.addEventListener('click', async () => {
     const character = characterInput.value.trim();
 
     // Get selected model type from radio buttons
@@ -1433,12 +1784,38 @@ characterSubmit.addEventListener('click', () => {
         console.log('User selected model type:', userModelType);
         console.log('User selected player mode:', userPlayerMode, 'player(s)');
 
-        // Hide modal, show loading
-        characterModal.classList.add('hidden');
-        loadingElement.classList.remove('hidden');
-        loadingElement.style.display = ''; // Ensure it's visible
+        // Create a new session
+        const session = await createSession(userCharacter, userModelType, userPlayerMode);
+        if (!session) {
+            alert('Failed to create session. Please try again.');
+            return;
+        }
 
-        // Start generation with the selected character
+        // Set current session
+        currentSessionId = session.sessionId;
+        currentSession = session;
+
+        // Update UI with session ID
+        document.getElementById('session-uuid').textContent = currentSessionId;
+
+        console.log('Created new session:', currentSessionId);
+
+        // Hide modals with explicit display none
+        characterModal.classList.add('hidden');
+        characterModal.style.display = 'none';
+
+        // Also ensure session modal is hidden
+        const sessionModal = document.getElementById('session-modal');
+        sessionModal.classList.add('hidden');
+        sessionModal.style.display = 'none';
+
+        // Show loading modal
+        loadingElement.classList.remove('hidden');
+        loadingElement.style.display = '';
+
+        console.log('[UI] Character modal hidden, loading modal shown');
+
+        // Start generation with the selected character and session
         generateAllAssets(userCharacter);
     } else {
         // Flash the input border to indicate it's required
