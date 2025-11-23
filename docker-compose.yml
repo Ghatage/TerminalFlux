@@ -1,0 +1,44 @@
+version: '3.8'
+
+services:
+  terminal-flux:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: terminal-flux:latest
+    container_name: terminal-flux
+    ports:
+      - "8081:8081"
+    environment:
+      - NODE_ENV=production
+      - FAL_KEY=${FAL_KEY}
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    volumes:
+      # Persistent storage for session assets (AI-generated content)
+      - terminal-flux-assets:/app/assets
+      # Persistent storage for SQLite database
+      - terminal-flux-database:/app/database
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - terminal-flux-network
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  terminal-flux-assets:
+    driver: local
+  terminal-flux-database:
+    driver: local
+
+networks:
+  terminal-flux-network:
+    driver: bridge
