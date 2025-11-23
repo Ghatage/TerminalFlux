@@ -5,7 +5,6 @@
   "main": "app.js",
   "type": "module",
   "scripts": {
-    "generate": "node generate-texture.js",
     "start": "node server.js",
     "dev": "npm start"
   },

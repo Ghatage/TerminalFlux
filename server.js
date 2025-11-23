@@ -127,7 +127,7 @@ app.post('/api/generate-texture', async (req, res) => {
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: prompt || "Ultra high quality seamless tileable ground texture, photorealistic floor pattern for games, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
+        prompt: prompt || "Ultra high quality seamless tileable sci-fi ground texture, photorealistic metallic floor with intricate circuit patterns, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -189,7 +189,7 @@ app.post('/api/generate-character', async (req, res) => {
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: "Ultra high quality 3D character design, photorealistic corgi dog, extremely detailed body parts with clean surface topology, perfect for 3D reconstruction, front view facing camera directly, neutral white background, studio lighting setup, ultra sharp focus, 8K resolution, highly detailed textures and materials, clean silhouette for 3D model generation, symmetrical design, no occlusions or overlapping parts"
+        prompt: "Ultra high quality 3D character design, photorealistic sci-fi robot warrior, extremely detailed mechanical parts with clean surface topology, perfect for 3D reconstruction, front view facing camera directly, T-pose or A-pose stance, neutral white background, studio lighting setup, ultra sharp focus, 8K resolution, highly detailed textures and materials, clean silhouette for 3D model generation, symmetrical design, no occlusions or overlapping parts"
       },
       logs: true,
       onQueueUpdate: (update) => {

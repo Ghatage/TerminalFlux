@@ -445,9 +445,7 @@ async function generateAllAssets() {
         const groundResponse = await fetch('http://localhost:8081/api/generate-texture', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                prompt: "Ultra high quality seamless tileable sci-fi ground texture, floor pattern for games, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
-            })
+            body: JSON.stringify({})  // Server has default ultra high quality prompt
         });
 
         const groundData = await groundResponse.json();
