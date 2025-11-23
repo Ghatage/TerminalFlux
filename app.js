@@ -19,8 +19,8 @@ const WALL_THICKNESS = 0.5;
 
 // Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x87CEEB); // Light blue sky background
-scene.fog = new THREE.Fog(0x87CEEB, 10, 50); // Matching light blue fog
+scene.background = new THREE.Color(0x2d1b3d); // Dark purple ominous sky
+scene.fog = new THREE.Fog(0x2d1b3d, 10, 50); // Matching dark purple fog
 
 // Camera setup
 const camera = new THREE.PerspectiveCamera(
@@ -59,14 +59,14 @@ controls.maxPolarAngle = Math.PI / 2; // Don't let camera go below ground
 
 // Add HemisphereLight for natural ambient gradient
 const hemisphereLight = new THREE.HemisphereLight(
-    0x87CEEB, // Sky color (light blue)
-    0xffffff, // Ground color (white for brighter ground)
-    1.5       // Increased intensity for super bright
+    0x2d1b3d, // Sky color (dark purple - matches ominous sky)
+    0x8080a0, // Ground color (light grayish-purple)
+    0.8       // Reduced intensity for moody atmosphere
 );
 scene.add(hemisphereLight);
 
-// Brighter white ambient light (changed from gray)
-const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Increased for super bright
+// Ambient light with subtle purple tint for ominous atmosphere
+const ambientLight = new THREE.AmbientLight(0xd8d0ff, 0.5); // Purple tint, reduced intensity
 scene.add(ambientLight);
 
 // Main directional light (stronger intensity for better visibility)
@@ -85,7 +85,7 @@ directionalLight.shadow.camera.bottom = -10;
 scene.add(directionalLight);
 
 // Single fill light instead of multiple directions (prevents washing out)
-const fillLight = new THREE.DirectionalLight(0xffffff, 1.5); // Increased for super bright
+const fillLight = new THREE.DirectionalLight(0xffffff, 1.2); // Reduced for moody atmosphere
 fillLight.position.set(-3, 5, 2);
 scene.add(fillLight);
 
@@ -100,28 +100,28 @@ scene.add(purpleLight);
 
 // Four powerful directional lights at ground level pointing inward
 // North light (positive Z direction)
-const northLight = new THREE.DirectionalLight(0xffffff, 2.5);
+const northLight = new THREE.DirectionalLight(0xffffff, 1.5);
 northLight.position.set(0, 1, 10); // At ground level, far north
 northLight.target.position.set(0, 0, 0); // Point at center
 scene.add(northLight);
 scene.add(northLight.target);
 
 // South light (negative Z direction)
-const southLight = new THREE.DirectionalLight(0xffffff, 2.5);
+const southLight = new THREE.DirectionalLight(0xffffff, 1.5);
 southLight.position.set(0, 1, -10); // At ground level, far south
 southLight.target.position.set(0, 0, 0); // Point at center
 scene.add(southLight);
 scene.add(southLight.target);
 
 // East light (positive X direction)
-const eastLight = new THREE.DirectionalLight(0xffffff, 2.5);
+const eastLight = new THREE.DirectionalLight(0xffffff, 1.5);
 eastLight.position.set(10, 1, 0); // At ground level, far east
 eastLight.target.position.set(0, 0, 0); // Point at center
 scene.add(eastLight);
 scene.add(eastLight.target);
 
 // West light (negative X direction)
-const westLight = new THREE.DirectionalLight(0xffffff, 2.5);
+const westLight = new THREE.DirectionalLight(0xffffff, 1.5);
 westLight.position.set(-10, 1, 0); // At ground level, far west
 westLight.target.position.set(0, 0, 0); // Point at center
 scene.add(westLight);
@@ -132,7 +132,7 @@ const ringRadius = 8;
 const numRingLights = 8;
 for (let i = 0; i < numRingLights; i++) {
     const angle = (i / numRingLights) * Math.PI * 2;
-    const pointLight = new THREE.PointLight(0xffffff, 2.0, 15);
+    const pointLight = new THREE.PointLight(0xffffff, 1.2, 15);
     pointLight.position.set(
         Math.cos(angle) * ringRadius,
         2, // Character height
@@ -178,6 +178,11 @@ let wallHelpers = [];
 
 // Store generated images for display
 const generatedImages = [];
+
+// Environmental objects
+let environmentalObjects = []; // Store {mesh, body} pairs for physics sync
+let environmentalMeshes = [];
+let environmentalBodies = [];
 
 // Function to update loading UI
 function updateLoadingUI(message, submessage = '', showSpinner = true) {
@@ -303,7 +308,7 @@ function createGround(texture) {
     // Configure texture for tiling
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(4, 4); // Tile the texture 4x4 times
+    texture.repeat.set(40, 40); // Tile the texture 40x40 times
     texture.colorSpace = THREE.SRGBColorSpace;
 
     // Create ground geometry
@@ -354,31 +359,13 @@ function createGround(texture) {
 
 // Create boundary walls around the ground
 function createBoundaryWalls() {
-    // Wall configurations: [name, position, halfExtents]
+    // Only create South Wall (for meme posters)
     const walls = [
-        {
-            name: 'North Wall',
-            position: { x: 0, y: WALL_HEIGHT / 2, z: GROUND_SIZE / 2 },
-            halfExtents: new CANNON.Vec3(GROUND_SIZE / 2, WALL_HEIGHT / 2, WALL_THICKNESS / 2),
-            dimensions: { width: GROUND_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS }
-        },
         {
             name: 'South Wall',
             position: { x: 0, y: WALL_HEIGHT / 2, z: -GROUND_SIZE / 2 },
             halfExtents: new CANNON.Vec3(GROUND_SIZE / 2, WALL_HEIGHT / 2, WALL_THICKNESS / 2),
             dimensions: { width: GROUND_SIZE, height: WALL_HEIGHT, depth: WALL_THICKNESS }
-        },
-        {
-            name: 'East Wall',
-            position: { x: GROUND_SIZE / 2, y: WALL_HEIGHT / 2, z: 0 },
-            halfExtents: new CANNON.Vec3(WALL_THICKNESS / 2, WALL_HEIGHT / 2, GROUND_SIZE / 2),
-            dimensions: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: GROUND_SIZE }
-        },
-        {
-            name: 'West Wall',
-            position: { x: -GROUND_SIZE / 2, y: WALL_HEIGHT / 2, z: 0 },
-            halfExtents: new CANNON.Vec3(WALL_THICKNESS / 2, WALL_HEIGHT / 2, GROUND_SIZE / 2),
-            dimensions: { width: WALL_THICKNESS, height: WALL_HEIGHT, depth: GROUND_SIZE }
         }
     ];
 
@@ -428,12 +415,12 @@ function createBoundaryWalls() {
         console.log(`[OK] ${wall.name} created at (${wall.position.x}, ${wall.position.y}, ${wall.position.z})`);
     });
 
-    console.log('[OK] All boundary walls created with physics!');
+    console.log('[OK] South Wall created with physics!');
 }
 
-// Create meme poster on wall
-async function createMemePoster(sessionId) {
-    console.log('[POSTER] Generating meme poster...');
+// Create a single meme poster on wall
+async function createSinglePoster(prompt, position, rotation, sessionId, filename) {
+    console.log(`[POSTER] Generating meme: ${filename}...`);
 
     try {
         // Generate meme image via API
@@ -441,18 +428,17 @@ async function createMemePoster(sessionId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                prompt: 'Make a funny meme about hackathons',
-                sessionId: sessionId
+                prompt: prompt,
+                sessionId: sessionId,
+                filename: filename
             })
         });
 
         const data = await response.json();
         if (!data.success) {
-            console.error('[POSTER] Failed to generate meme:', data.error);
+            console.error(`[POSTER] Failed to generate ${filename}:`, data.error);
             return;
         }
-
-        console.log('[POSTER] Loading meme texture...');
 
         // Load texture
         const posterTexture = await new Promise((resolve, reject) => {
@@ -482,19 +468,247 @@ async function createMemePoster(sessionId) {
 
         // Create mesh
         const posterMesh = new THREE.Mesh(posterGeometry, posterMaterial);
-
-        // Position on South Wall
-        // South Wall is at z: -10 (center at -10, extends from -9.75 to -10.25)
-        // Place poster slightly in front at z: -9.74 to avoid z-fighting
-        posterMesh.position.set(0, 2, -9.74);  // Centered, at eye height, in front of wall
-        posterMesh.rotation.y = 0;  // Face forward (toward camera)
+        posterMesh.position.set(position.x, position.y, position.z);
+        posterMesh.rotation.y = rotation;
 
         scene.add(posterMesh);
 
-        console.log('[OK] Meme poster added to South Wall!');
+        console.log(`[OK] ${filename} poster added!`);
     } catch (error) {
-        console.error('[POSTER] Error creating poster:', error);
+        console.error(`[POSTER] Error creating ${filename}:`, error);
     }
+}
+
+// Create all meme posters on walls
+async function createMemePosters(sessionId) {
+    console.log('[POSTERS] Generating all meme posters...');
+
+    // Define all posters to create
+    const posters = [
+        {
+            prompt: 'Make a funny meme about hackathons',
+            position: { x: -4.5, y: 2, z: -9.74 },  // South Wall, left
+            rotation: 0,
+            filename: 'hackathons-meme.png'
+        },
+        {
+            prompt: 'Make a funny meme about digital ocean the software company',
+            position: { x: -1.5, y: 2, z: -9.74 },  // South Wall, center-left
+            rotation: 0,
+            filename: 'digitalocean-meme.png'
+        },
+        {
+            prompt: 'Make a funny meme about blackforest labs the ai company',
+            position: { x: 1.5, y: 2, z: -9.74 },   // South Wall, center-right
+            rotation: 0,
+            filename: 'blackforestlabs-meme.png'
+        },
+        {
+            prompt: 'Make a funny meme about cerebral valley the hackathon organizer',
+            position: { x: 4.5, y: 2, z: -9.74 },   // South Wall, right
+            rotation: 0,
+            filename: 'cerebralvalley-meme.png'
+        }
+    ];
+
+    // Generate all posters in parallel for speed
+    await Promise.all(
+        posters.map(poster =>
+            createSinglePoster(
+                poster.prompt,
+                poster.position,
+                poster.rotation,
+                sessionId,
+                poster.filename
+            )
+        )
+    );
+
+    console.log('[OK] All meme posters created!');
+}
+
+// Create environmental objects (LLM → Image → Trellis pipeline)
+async function createEnv(character, sessionId, objectType = 'object') {
+    const typeLabel = objectType === 'tree' ? 'Trees' : 'Environmental Object';
+    console.log(`[ENV] Generating ${typeLabel} for character: ${character}...`);
+
+    try {
+        // Step 1: Ask LLM for object description
+        const llmPrompt = objectType === 'tree'
+            ? `You are a game environment designer. Given this character: "${character}", describe a type of TREE that would fit thematically in this character's world. Be specific about the tree type, size, and appearance. Respond with ONLY a concise 2-3 sentence description of the tree, nothing else.`
+            : `You are a game environment designer. Given this character: "${character}", describe a recurring environmental object or prop that would fit thematically in this character's world. It should be a distinctive object that adds to the atmosphere. Respond with ONLY a concise 2-3 sentence description of the object, nothing else.`;
+
+        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: llmPrompt })
+        });
+        const llmData = await llmResponse.json();
+
+        if (!llmData.success) {
+            throw new Error('LLM query failed: ' + llmData.error);
+        }
+
+        const objectDescription = llmData.answer;
+        console.log(`[ENV] LLM generated ${typeLabel} description:`, objectDescription);
+
+        // Step 2: Generate image with white background
+        const imagePrompt = `Ultra high quality 3D ${objectType === 'tree' ? 'tree' : 'object'}, ${objectDescription}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
+
+        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pose: objectType, // Use 'tree' or 'object' as pose identifier
+                character: imagePrompt,
+                sessionId: sessionId
+            })
+        });
+        const imageData = await imageResponse.json();
+
+        if (!imageData.success) {
+            throw new Error('Image generation failed: ' + imageData.error);
+        }
+
+        console.log(`[ENV] ${typeLabel} image generated:`, imageData.imageUrl);
+        addImageToGallery(imageData.remoteUrl || imageData.imageUrl, `${typeLabel} - Base Image`);
+
+        // Ensure we have remote URL for Trellis
+        if (!imageData.remoteUrl) {
+            throw new Error('No remote URL returned from image generation - Trellis requires remote URLs');
+        }
+
+        // Step 3: Generate 3D model with Trellis (single image) - use REMOTE URL only
+        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrls: [imageData.remoteUrl], // Always use remote URL for Trellis
+                pose: objectType,
+                modelType: userModelType, // Use same model type as character
+                sessionId: sessionId
+            })
+        });
+        const modelData = await modelResponse.json();
+
+        if (!modelData.success) {
+            throw new Error('3D model generation failed: ' + modelData.error);
+        }
+
+        console.log(`[ENV] ${typeLabel} 3D model generated:`, modelData.modelUrl);
+
+        return {
+            success: true,
+            modelUrl: modelData.modelUrl,
+            description: objectDescription,
+            objectType: objectType
+        };
+
+    } catch (error) {
+        console.error(`[ENV] Error generating ${typeLabel}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Place environmental objects randomly on ground with physics
+async function placeEnvironmentalObjects(modelUrl, count, objectType, description) {
+    const typeLabel = objectType === 'tree' ? 'Tree' : 'Object';
+    console.log(`[ENV] Placing ${count} copies of ${typeLabel}...`);
+
+    for (let i = 0; i < count; i++) {
+        try {
+            const gltf = await new Promise((resolve, reject) => {
+                gltfLoader.load(
+                    modelUrl + '?t=' + Date.now() + '&copy=' + i,
+                    resolve,
+                    undefined,
+                    reject
+                );
+            });
+
+            const mesh = gltf.scene;
+
+            // Calculate bounding box for scaling
+            const box = new THREE.Box3().setFromObject(mesh);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            // Scale based on object type
+            let targetSize;
+            if (objectType === 'tree') {
+                targetSize = 4 + Math.random() * 2; // Trees: 4-6 units tall
+            } else {
+                targetSize = 1.5 + Math.random() * 1.5; // Objects: 1.5-3 units (variable)
+            }
+
+            const scale = targetSize / maxDim;
+            mesh.scale.set(scale, scale, scale);
+
+            // Recalculate size after scaling
+            box.setFromObject(mesh);
+            const scaledSize = box.getSize(new THREE.Vector3());
+
+            // Random position on ground (with margin from edges)
+            const margin = 3;
+            const x = (Math.random() * (GROUND_SIZE - margin * 2)) - (GROUND_SIZE / 2 - margin);
+            const z = (Math.random() * (GROUND_SIZE - margin * 2)) - (GROUND_SIZE / 2 - margin);
+            const y = scaledSize.y / 2; // Place at ground level
+
+            mesh.position.set(x, y, z);
+
+            // Random rotation around Y axis for variety
+            mesh.rotation.y = Math.random() * Math.PI * 2;
+
+            // Enable shadows
+            mesh.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
+                    if (child.material) {
+                        if (child.material.map) {
+                            child.material.map.colorSpace = THREE.SRGBColorSpace;
+                        }
+                        child.material.needsUpdate = true;
+                    }
+                }
+            });
+
+            scene.add(mesh);
+
+            // Create physics body (STATIC - mass = 0)
+            const halfExtents = new CANNON.Vec3(
+                scaledSize.x / 2,
+                scaledSize.y / 2,
+                scaledSize.z / 2
+            );
+            const objectShape = new CANNON.Box(halfExtents);
+
+            const objectBody = new CANNON.Body({
+                mass: 0, // Static object (doesn't move)
+                shape: objectShape,
+                material: groundMaterial
+            });
+
+            // Position body at base of object
+            objectBody.position.set(x, y, z);
+            objectBody.quaternion.copy(mesh.quaternion);
+
+            world.addBody(objectBody);
+
+            // Store references
+            environmentalObjects.push({ mesh, body: objectBody });
+            environmentalMeshes.push(mesh);
+            environmentalBodies.push(objectBody);
+
+            console.log(`[ENV] Placed ${typeLabel} ${i + 1}/${count} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
+
+        } catch (error) {
+            console.error(`[ENV] Error placing ${typeLabel} copy ${i + 1}:`, error);
+        }
+    }
+
+    console.log(`[ENV] Finished placing ${count} ${typeLabel}s`);
 }
 
 // Function to load a different pose model (all models are pre-generated at startup)
@@ -882,6 +1096,18 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
 
         const idleImageUrl = idleBaseData.remoteUrl || idleBaseData.imageUrl;
 
+        // ==================== ENV OBJECTS: Start generation in background ====================
+        updateLoadingUI('🌲 Starting environmental generation...', 'Creating thematic props and trees');
+        console.log('🌲 ENV: Starting environmental objects and trees generation...');
+
+        const envPromises = [
+            createEnv(character, currentSessionId, 'object'),
+            createEnv(character, currentSessionId, 'tree')
+        ];
+
+        // Don't await yet - let them run in background while we do Phase 2
+        const envGenerationPromise = Promise.all(envPromises);
+
         // ==================== PHASE 2: Idle Views (5 Parallel) ====================
         updateLoadingUI('⚡ Phase 2: Generating all idle views...', 'Creating 5 views in parallel');
         console.log('⚡ PHASE 2: Generating 5 idle views in parallel...');
@@ -930,8 +1156,8 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         // Create boundary walls
         createBoundaryWalls();
 
-        // Create meme poster on wall
-        await createMemePoster(currentSessionId);
+        // Create all meme posters on walls
+        await createMemePosters(currentSessionId);
 
         // ==================== PHASE 3: Idle 3D + Pose Bases (2 Parallel) ====================
         updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking base pose');
@@ -991,6 +1217,29 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
             addImageToGallery(walkingImageUrl, 'Character - Walking Front');
         }
         // if (shootingImageUrl) console.log(`✅ Shooting base ${shootingBaseData.cached ? 'cached' : 'generated'}`);
+
+        // ==================== ENV OBJECTS: Wait for generation and place in scene ====================
+        updateLoadingUI('🌲 Placing environmental objects...', 'Adding props and trees to scene');
+        console.log('🌲 ENV: Waiting for environmental object generation to complete...');
+
+        const envResults = await envGenerationPromise;
+        const [objectResult, treeResult] = envResults;
+
+        if (objectResult.success) {
+            console.log('✅ Environmental object model ready:', objectResult.description);
+            await placeEnvironmentalObjects(objectResult.modelUrl, 5, 'object', objectResult.description);
+        } else {
+            console.warn('⚠️ Environmental object generation failed:', objectResult.error);
+        }
+
+        if (treeResult.success) {
+            console.log('✅ Tree model ready:', treeResult.description);
+            await placeEnvironmentalObjects(treeResult.modelUrl, 5, 'tree', treeResult.description);
+        } else {
+            console.warn('⚠️ Tree generation failed:', treeResult.error);
+        }
+
+        console.log('🎉 Environmental objects complete!');
 
         // ==================== PHASE 4: All Views + 3D Models (12 Parallel) ====================
         updateLoadingUI('💥 Phase 4: Final parallel generation...', 'All remaining views and 3D models');

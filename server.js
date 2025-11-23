@@ -1038,7 +1038,7 @@ app.post('/api/llm/query', async (req, res) => {
 // Generate meme poster
 app.post('/api/generate-meme', async (req, res) => {
   try {
-    const { prompt, sessionId } = req.body;
+    const { prompt, sessionId, filename = 'meme-poster.png' } = req.body;
 
     if (!prompt) {
       return res.status(400).json({
@@ -1047,27 +1047,19 @@ app.post('/api/generate-meme', async (req, res) => {
       });
     }
 
-    console.log('[MEME] Generating meme poster...');
+    console.log(`[MEME] Generating meme: ${filename}...`);
 
     // Determine paths based on session or legacy
     const memePath = sessionId
-      ? getAssetPath(sessionId, 'images', null, 'meme-poster.png')
-      : join(ASSETS_DIR, 'images', 'meme-poster.png');
+      ? getAssetPath(sessionId, 'images', null, filename)
+      : join(ASSETS_DIR, 'images', filename);
 
     const memeUrl = sessionId
-      ? getAssetUrl(sessionId, 'images', null, 'meme-poster.png')
-      : `/assets/images/meme-poster.png`;
+      ? getAssetUrl(sessionId, 'images', null, filename)
+      : `/assets/images/${filename}`;
 
-    // Check if meme exists (reuse)
-    if (existsSync(memePath)) {
-      console.log('[REUSE] Reusing existing meme poster');
-      res.json({
-        success: true,
-        imageUrl: memeUrl,
-        cached: true
-      });
-      return;
-    }
+    // ALWAYS regenerate memes (no caching) to ensure fresh content every time
+    console.log('[MEME] Generating fresh meme (no caching)...');
 
     // Generate with FAL AI
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
