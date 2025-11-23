@@ -189,6 +189,9 @@ let environmentalBodies = [];
 let interactableObjects = []; // Store {mesh, loreDescription, modelUrl, objectType}
 let nearestInteractableObject = null; // Track which object player is currently near
 
+// Inventory/Bag system (in-memory only, not persisted)
+let playerBag = []; // Store collected items: [{objectIndex, puzzleType, description, loreDescription, modelUrl, mesh}]
+
 // Altar and Nemotron model
 let altarMesh;
 let altarBody;
@@ -507,6 +510,160 @@ function hideObjectViewer() {
     }
 }
 
+// ==================== INVENTORY/BAG SYSTEM ====================
+
+// Check if an object is already in the bag
+function isInBag(objectIndex) {
+    return playerBag.some(item => item.objectIndex === objectIndex);
+}
+
+// Add object to bag and remove from scene
+function addToBag(object) {
+    if (!object || !object.mesh) {
+        console.warn('[BAG] Cannot add to bag - invalid object');
+        return false;
+    }
+
+    // Only puzzle objects can be collected
+    if (!object.isPuzzleObject) {
+        console.warn('[BAG] Cannot add to bag - not a puzzle object');
+        return false;
+    }
+
+    // Prevent duplicates
+    if (isInBag(object.objectIndex)) {
+        console.log('[BAG] Item already in bag');
+        return false;
+    }
+
+    // Add to bag
+    playerBag.push({
+        objectIndex: object.objectIndex,
+        puzzleType: object.puzzleType,
+        description: object.description,
+        loreDescription: object.loreDescription,
+        modelUrl: object.modelUrl,
+        mesh: object.mesh
+    });
+
+    // Remove from scene
+    scene.remove(object.mesh);
+
+    // Remove from physics world
+    if (object.body) {
+        world.removeBody(object.body);
+    }
+
+    // Remove from interactable registry
+    const index = interactableObjects.indexOf(object);
+    if (index > -1) {
+        interactableObjects.splice(index, 1);
+    }
+
+    console.log(`[BAG] Added ${object.objectType} to bag (${playerBag.length}/5 items)`);
+    return true;
+}
+
+// Check if player has all solution objects
+function hasAllSolutionObjects() {
+    const solutionObjects = playerBag.filter(item => item.puzzleType === 'solution');
+    return solutionObjects.length === 2; // Need both solution objects
+}
+
+// Show bag inventory modal
+function showBagModal() {
+    console.log('[BAG] Opening bag modal');
+
+    const modal = document.getElementById('bag-modal');
+    if (!modal) return;
+
+    // Update item count
+    const countElement = document.getElementById('bag-item-count');
+    if (countElement) {
+        countElement.textContent = `${playerBag.length}/5`;
+    }
+
+    // Render bag items
+    const gridElement = document.getElementById('bag-grid');
+    if (gridElement) {
+        if (playerBag.length === 0) {
+            gridElement.innerHTML = `
+                <div style="grid-column: 1 / -1; text-align: center; color: #888; padding: 40px 20px;">
+                    <p style="font-size: 18px; margin: 0;">No items collected yet</p>
+                    <p style="font-size: 14px; margin-top: 10px;">Press F near puzzle objects to collect them</p>
+                </div>
+            `;
+        } else {
+            gridElement.innerHTML = playerBag.map((item, index) => {
+                const displayName = item.description.substring(0, 40) + (item.description.length > 40 ? '...' : '');
+                const typeColor = item.puzzleType === 'solution' ? '#39ff14' : '#888';
+                return `
+                    <div class="bag-item-card" data-bag-index="${index}">
+                        <div class="bag-item-icon" style="background: rgba(57, 255, 20, 0.1); border: 2px solid ${typeColor};">
+                            <span style="font-size: 40px;">📦</span>
+                        </div>
+                        <div class="bag-item-name" style="color: ${typeColor};">${displayName}</div>
+                        <div class="bag-item-type" style="color: #666; font-size: 11px; margin-top: 4px;">${item.puzzleType}</div>
+                    </div>
+                `;
+            }).join('');
+
+            // Add click handlers for bag items
+            document.querySelectorAll('.bag-item-card').forEach((card) => {
+                card.addEventListener('click', () => {
+                    const bagIndex = parseInt(card.dataset.bagIndex);
+                    const item = playerBag[bagIndex];
+                    if (item) {
+                        hideBagModal();
+                        showObjectViewer(item);
+                    }
+                });
+            });
+        }
+    }
+
+    modal.classList.remove('hidden');
+}
+
+// Hide bag inventory modal
+function hideBagModal() {
+    console.log('[BAG] Closing bag modal');
+
+    const modal = document.getElementById('bag-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
+// Show congratulations modal
+function showCongratulationsModal() {
+    console.log('[CONGRATS] Showing congratulations modal');
+
+    const modal = document.getElementById('congratulations-modal');
+    if (!modal) return;
+
+    // List the collected solution objects
+    const solutionObjects = playerBag.filter(item => item.puzzleType === 'solution');
+    const listElement = document.getElementById('congratulations-objects');
+    if (listElement) {
+        listElement.innerHTML = solutionObjects.map(item =>
+            `<li>${item.description.substring(0, 50)}${item.description.length > 50 ? '...' : ''}</li>`
+        ).join('');
+    }
+
+    modal.classList.remove('hidden');
+}
+
+// Hide congratulations modal
+function hideCongratulationsModal() {
+    console.log('[CONGRATS] Closing congratulations modal');
+
+    const modal = document.getElementById('congratulations-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+}
+
 // Set up image viewer modal close handlers
 document.addEventListener('DOMContentLoaded', () => {
     const imageViewerModal = document.getElementById('image-viewer-modal');
@@ -554,6 +711,48 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Add handler for "Add to Bag" button
+    const addToBagBtn = document.getElementById('add-to-bag-btn');
+    if (addToBagBtn) {
+        addToBagBtn.addEventListener('click', () => {
+            if (nearestInteractableObject && nearestInteractableObject.isPuzzleObject) {
+                const success = addToBag(nearestInteractableObject);
+                if (success) {
+                    hideObjectViewer();
+                    console.log('[BAG] Item added, closing viewer');
+                }
+            } else {
+                console.warn('[BAG] Cannot add - not a puzzle object or no object selected');
+            }
+        });
+    }
+
+    // Add close handler for Bag modal
+    const bagModal = document.getElementById('bag-modal');
+    const bagCloseBtn = document.getElementById('bag-close');
+    if (bagCloseBtn) {
+        bagCloseBtn.addEventListener('click', () => {
+            hideBagModal();
+        });
+    }
+
+    // Add close handler for Congratulations modal
+    const congratulationsModal = document.getElementById('congratulations-modal');
+    const congratulationsCloseBtn = document.getElementById('congratulations-close');
+    if (congratulationsCloseBtn) {
+        congratulationsCloseBtn.addEventListener('click', () => {
+            hideCongratulationsModal();
+        });
+    }
+
+    // Add handler for Congratulations "Continue Adventure" button
+    const congratulationsContinueBtn = document.getElementById('congratulations-continue');
+    if (congratulationsContinueBtn) {
+        congratulationsContinueBtn.addEventListener('click', () => {
+            hideCongratulationsModal();
+        });
+    }
+
     // Close on ESC key
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
@@ -574,6 +773,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (objectViewerModal && !objectViewerModal.classList.contains('hidden')) {
                 hideObjectViewer();
             }
+            // Also allow ESC to close Bag modal
+            if (bagModal && !bagModal.classList.contains('hidden')) {
+                hideBagModal();
+            }
+            // Also allow ESC to close Congratulations modal
+            if (congratulationsModal && !congratulationsModal.classList.contains('hidden')) {
+                hideCongratulationsModal();
+            }
         }
     });
 
@@ -583,6 +790,24 @@ document.addEventListener('DOMContentLoaded', () => {
             imageViewerModal.classList.add('hidden');
         }
     });
+
+    // Close bag modal on background click
+    if (bagModal) {
+        bagModal.addEventListener('click', (event) => {
+            if (event.target === bagModal) {
+                hideBagModal();
+            }
+        });
+    }
+
+    // Close congratulations modal on background click
+    if (congratulationsModal) {
+        congratulationsModal.addEventListener('click', (event) => {
+            if (event.target === congratulationsModal) {
+                hideCongratulationsModal();
+            }
+        });
+    }
 });
 
 // Create ground plane
@@ -1097,7 +1322,7 @@ async function placePuzzleObjects(objectModels, existingObjects) {
             world.addBody(objectBody);
 
             // Store with full metadata for future interaction
-            puzzleObjects.push({
+            const puzzleObject = {
                 mesh: mesh,
                 body: objectBody,
                 isPuzzleObject: true,
@@ -1106,16 +1331,15 @@ async function placePuzzleObjects(objectModels, existingObjects) {
                 description: objData.description,
                 loreDescription: objData.loreDescription || objData.description,
                 modelUrl: objData.modelUrl, // Store model URL for viewer
+                objectType: `puzzle_${objData.type}`,
                 preparingForInteraction: true // Flag for future inventory system
-            });
+            };
 
-            // Register for universal interaction system
-            registerInteractableObject(
-                mesh,
-                objData.loreDescription || objData.description,
-                objData.modelUrl,
-                `puzzle_${objData.type}`
-            );
+            puzzleObjects.push(puzzleObject);
+
+            // Register for universal interaction system - use the full object
+            interactableObjects.push(puzzleObject);
+            console.log(`[INTERACTION] Registered puzzle_${objData.type} object for interaction (total: ${interactableObjects.length})`);
 
             console.log(`[PUZZLE] Placed ${objData.type} object ${i + 1}/${objectModels.length} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
 
@@ -2920,14 +3144,34 @@ window.addEventListener('keydown', (event) => {
     //     loadPoseModel('shooting');
     // }
 
+    // B - Toggle bag inventory modal (only in gameplay mode)
+    if (key === 'b' && gameplayMode) {
+        const bagModal = document.getElementById('bag-modal');
+        if (bagModal) {
+            if (bagModal.classList.contains('hidden')) {
+                showBagModal();
+            } else {
+                hideBagModal();
+            }
+        }
+    }
+
     // F - Universal object interaction (when in proximity and in gameplay mode)
     if (key === 'f' && gameplayMode && nearestInteractableObject) {
         console.log('[INTERACTION] F key pressed - interacting with nearest object');
 
-        // Check if it's Nemotron (special case with riddle modal)
+        // Check if it's Nemotron (special case with riddle/victory modal)
         if (nearestInteractableObject.isNemotron) {
-            console.log('[INTERACTION] Showing Nemotron dialogue');
-            showNemotronDialogue();
+            console.log('[INTERACTION] Interacting with Nemotron');
+
+            // Check if player has all solution objects (victory condition)
+            if (hasAllSolutionObjects()) {
+                console.log('[VICTORY] Player has all solution objects! Showing congratulations modal');
+                showCongratulationsModal();
+            } else {
+                console.log('[INTERACTION] Showing Nemotron dialogue (riddle)');
+                showNemotronDialogue();
+            }
         } else {
             // Show object viewer for all other interactable objects
             console.log(`[INTERACTION] Showing object viewer for ${nearestInteractableObject.objectType}`);

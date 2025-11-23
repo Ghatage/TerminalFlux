@@ -738,7 +738,7 @@
     <!-- Object Viewer Modal -->
     <div id="object-viewer-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 106;">
         <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
-            <div style="position: relative; background: rgba(0, 0, 0, 0.9); padding: 40px 50px; border-radius: 16px; border: 2px solid #39ff14; box-shadow: 0 0 50px rgba(57, 255, 20, 0.5); max-width: 650px; text-align: center; animation: modalAppear 0.5s ease;">
+            <div style="position: relative; background: rgba(0, 0, 0, 0.9); padding: 40px 50px 30px 50px; border-radius: 16px; border: 2px solid #39ff14; box-shadow: 0 0 50px rgba(57, 255, 20, 0.5); width: 650px; max-height: 700px; text-align: center; animation: modalAppear 0.5s ease;">
                 <!-- Close button -->
                 <div id="object-viewer-close" style="position: absolute; top: 15px; right: 15px; width: 35px; height: 35px; background: rgba(255, 0, 0, 0.2); border: 2px solid #ff4444; border-radius: 50%; color: #ff4444; font-size: 24px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;">
                     ×
@@ -749,10 +749,78 @@
                     <canvas id="object-viewer-canvas" style="width: 100%; height: 100%; display: block;"></canvas>
                 </div>
 
-                <!-- Object Lore Description -->
-                <div id="object-viewer-description" style="color: #fff; font-size: 16px; line-height: 1.6; margin: 0; padding: 20px; background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2); border-radius: 8px; max-width: 500px; margin: 0 auto; text-align: left;">
+                <!-- Object Lore Description (scrollable) -->
+                <div id="object-viewer-description" style="color: #fff; font-size: 16px; line-height: 1.6; margin: 0 auto 20px auto; padding: 20px; background: rgba(57, 255, 20, 0.05); border: 1px solid rgba(57, 255, 20, 0.2); border-radius: 8px; max-width: 500px; text-align: left; max-height: 150px; overflow-y: auto;">
                     <!-- Description will be populated dynamically -->
                 </div>
+
+                <!-- Add to Bag Button -->
+                <button id="add-to-bag-btn" style="padding: 12px 30px; font-size: 16px; background: linear-gradient(135deg, #39ff14, #00cc66); color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(57, 255, 20, 0.3); margin-top: 10px;">
+                    Add to Bag
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bag Inventory Modal -->
+    <div id="bag-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 107;">
+        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+            <div style="position: relative; background: rgba(0, 0, 0, 0.9); padding: 40px 50px; border-radius: 16px; border: 2px solid #39ff14; box-shadow: 0 0 50px rgba(57, 255, 20, 0.5); max-width: 700px; width: 90%; max-height: 80vh; overflow-y: auto; animation: modalAppear 0.5s ease;">
+                <!-- Close button -->
+                <div id="bag-close" style="position: absolute; top: 15px; right: 15px; width: 35px; height: 35px; background: rgba(255, 0, 0, 0.2); border: 2px solid #ff4444; border-radius: 50%; color: #ff4444; font-size: 24px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;">
+                    ×
+                </div>
+
+                <!-- Title and Item Count -->
+                <h2 style="color: #39ff14; font-size: 32px; margin: 0 0 10px 0; text-shadow: 0 0 20px rgba(57, 255, 20, 0.5); text-align: center;">
+                    Your Bag
+                </h2>
+                <p style="color: #888; text-align: center; margin: 0 0 30px 0; font-size: 14px;">
+                    Items: <span id="bag-item-count" style="color: #39ff14; font-weight: bold;">0/5</span>
+                </p>
+
+                <!-- Bag Grid -->
+                <div id="bag-grid" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-top: 20px;">
+                    <!-- Items will be rendered here dynamically -->
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Congratulations Modal -->
+    <div id="congratulations-modal" class="hidden" style="position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0, 0, 0, 0.95); z-index: 108;">
+        <div style="width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;">
+            <div style="background: linear-gradient(135deg, rgba(57, 255, 20, 0.1), rgba(255, 215, 0, 0.1)); padding: 50px 70px; border-radius: 16px; border: 3px solid #FFD700; box-shadow: 0 0 50px rgba(255, 215, 0, 0.6), inset 0 0 30px rgba(57, 255, 20, 0.2); max-width: 600px; text-align: center; animation: modalAppear 0.5s ease;">
+                <!-- Close button -->
+                <div id="congratulations-close" style="position: absolute; top: 15px; right: 15px; width: 35px; height: 35px; background: rgba(255, 0, 0, 0.2); border: 2px solid #ff4444; border-radius: 50%; color: #ff4444; font-size: 24px; font-weight: bold; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.3s ease;">
+                    ×
+                </div>
+
+                <!-- Victory Icon -->
+                <div style="font-size: 80px; margin-bottom: 20px;">🏆</div>
+
+                <!-- Title -->
+                <h2 style="color: #FFD700; font-size: 36px; margin: 0 0 20px 0; text-shadow: 0 0 30px rgba(255, 215, 0, 0.8); font-weight: bold;">
+                    CONGRATULATIONS!
+                </h2>
+
+                <!-- Message -->
+                <p style="color: #fff; font-size: 20px; line-height: 1.6; margin: 0 0 30px 0;">
+                    You have found the solution! The ancient knowledge is yours.
+                </p>
+
+                <!-- Collected Objects List -->
+                <div style="background: rgba(0, 0, 0, 0.5); padding: 20px; border-radius: 8px; border: 1px solid rgba(255, 215, 0, 0.3); margin-bottom: 30px;">
+                    <p style="color: #39ff14; font-size: 16px; margin: 0 0 15px 0; font-weight: bold;">Solution Objects:</p>
+                    <ul id="congratulations-objects" style="color: #fff; text-align: left; list-style: none; padding: 0; margin: 0;">
+                        <!-- Solution objects will be listed here -->
+                    </ul>
+                </div>
+
+                <!-- Close Button -->
+                <button id="congratulations-continue" style="padding: 15px 40px; font-size: 18px; background: linear-gradient(135deg, #FFD700, #FFA500); color: #000; border: none; border-radius: 8px; cursor: pointer; font-weight: bold; transition: all 0.3s ease; box-shadow: 0 4px 20px rgba(255, 215, 0, 0.5);">
+                    Continue Adventure
+                </button>
             </div>
         </div>
     </div>
