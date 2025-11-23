@@ -26,12 +26,12 @@ async function downloadImage(url, filepath) {
 }
 
 async function generateGroundTexture() {
-  console.log("🎨 Generating sci-fi ground texture with FAL AI...");
+  console.log("Generating sci-fi ground texture with FAL AI...");
 
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: "seamless tileable sci-fi abstract ground texture, futuristic floor pattern, metallic hexagonal tiles with glowing blue circuits, high detail, top-down view, perfect for game terrain, technical sci-fi aesthetic, 4k resolution"
+        prompt: "Seamless tileable ground texture, floor pattern for games, realistic, high detail, top-down view, perfect for game terrain, aesthetic, 4k resolution"
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -41,22 +41,22 @@ async function generateGroundTexture() {
       },
     });
 
-    console.log("✅ Generation complete!");
+    console.log("Generation complete!");
     console.log("Request ID:", result.requestId);
 
     if (result.data && result.data.images && result.data.images.length > 0) {
       const imageUrl = result.data.images[0].url;
-      console.log("📥 Downloading image...");
+      console.log("Downloading image...");
 
       await downloadImage(imageUrl, "ground-texture.png");
-      console.log("💾 Texture saved as: ground-texture.png");
-      console.log("\n🚀 You can now run 'npm start' to view the scene!");
+      console.log("Texture saved as: ground-texture.png");
+      console.log("\nYou can now run 'npm start' to view the scene!");
     } else {
-      console.error("❌ No images returned from API");
+      console.error("No images returned from API");
     }
 
   } catch (error) {
-    console.error("❌ Error generating texture:", error);
+    console.error("Error generating texture:", error);
     throw error;
   }
 }

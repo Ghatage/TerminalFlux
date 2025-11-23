@@ -2,7 +2,7 @@ import express from 'express';
 import { fal } from '@fal-ai/client';
 import { config } from 'dotenv';
 import cors from 'cors';
-import { writeFileSync, existsSync, mkdirSync } from 'fs';
+import { writeFileSync, readFileSync, existsSync, mkdirSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import https from 'https';
@@ -32,10 +32,22 @@ const CHARACTER_DIR = join(ASSETS_DIR, 'character');
 const MODELS_DIR = join(ASSETS_DIR, 'models');
 const GROUND_DIR = join(ASSETS_DIR, 'ground');
 
+// Pose configurations
+const POSES = ['idle', 'walking', 'shooting'];
+const DEFAULT_POSE = 'idle';
+
 // Ensure directories exist
 [ASSETS_DIR, CHARACTER_DIR, MODELS_DIR, GROUND_DIR].forEach(dir => {
   if (!existsSync(dir)) {
     mkdirSync(dir, { recursive: true });
+  }
+});
+
+// Create pose subdirectories
+POSES.forEach(pose => {
+  const poseDir = join(CHARACTER_DIR, pose);
+  if (!existsSync(poseDir)) {
+    mkdirSync(poseDir, { recursive: true });
   }
 });
 
@@ -61,16 +73,16 @@ async function downloadFile(url, filepath) {
 }
 
 // Check if all required assets exist
-function checkAssetsExist() {
+function checkAssetsExist(pose = DEFAULT_POSE) {
   const requiredFiles = {
     ground: join(GROUND_DIR, 'ground-texture.png'),
-    characterFront: join(CHARACTER_DIR, 'front.png'),
-    characterBack: join(CHARACTER_DIR, 'back.png'),
-    characterLeft: join(CHARACTER_DIR, 'left.png'),
-    characterRight: join(CHARACTER_DIR, 'right.png'),
-    characterAngle30: join(CHARACTER_DIR, 'angle_30.png'),
-    characterAngleN30: join(CHARACTER_DIR, 'angle_-30.png'),
-    model: join(MODELS_DIR, 'character.glb')
+    [`${pose}Front`]: join(CHARACTER_DIR, pose, 'front.png'),
+    [`${pose}Back`]: join(CHARACTER_DIR, pose, 'back.png'),
+    [`${pose}Left`]: join(CHARACTER_DIR, pose, 'left.png'),
+    [`${pose}Right`]: join(CHARACTER_DIR, pose, 'right.png'),
+    [`${pose}Angle30`]: join(CHARACTER_DIR, pose, 'angle_30.png'),
+    [`${pose}AngleN30`]: join(CHARACTER_DIR, pose, 'angle_-30.png'),
+    [`${pose}Model`]: join(MODELS_DIR, `character_${pose}.glb`)
   };
 
   const existing = {};
@@ -160,13 +172,14 @@ app.post('/api/generate-texture', async (req, res) => {
 // API endpoint to generate character
 app.post('/api/generate-character', async (req, res) => {
   console.log('[CHARACTER] Received character generation request...');
+  const { pose = DEFAULT_POSE } = req.body;
 
-  const frontPath = join(CHARACTER_DIR, 'front.png');
+  const frontPath = join(CHARACTER_DIR, pose, 'front.png');
   if (REUSE_ASSETS && existsSync(frontPath)) {
     console.log('[REUSE] Reusing existing character');
     res.json({
       success: true,
-      imageUrl: `/assets/character/front.png`,
+      imageUrl: `/assets/character/${pose}/front.png`,
       requestId: 'cached',
       cached: true
     });
@@ -197,7 +210,7 @@ app.post('/api/generate-character', async (req, res) => {
 
       res.json({
         success: true,
-        imageUrl: `/assets/character/front.png`,
+        imageUrl: `/assets/character/${pose}/front.png`,
         remoteUrl: imageUrl,
         requestId: result.requestId,
         cached: false
@@ -220,16 +233,16 @@ app.post('/api/generate-character', async (req, res) => {
 
 // API endpoint to repose character (generate angle variations)
 app.post('/api/repose-character', async (req, res) => {
-  const { imageUrl, angle, viewName } = req.body;
+  const { imageUrl, angle, viewName, pose = DEFAULT_POSE } = req.body;
 
   console.log(`[REPOSE] Reposing character to: ${viewName}`);
 
-  const outputPath = join(CHARACTER_DIR, `${viewName}.png`);
+  const outputPath = join(CHARACTER_DIR, pose, `${viewName}.png`);
   if (REUSE_ASSETS && existsSync(outputPath)) {
     console.log(`[REUSE] Reusing existing ${viewName} view`);
     res.json({
       success: true,
-      imageUrl: `/assets/character/${viewName}.png`,
+      imageUrl: `/assets/character/${pose}/${viewName}.png`,
       requestId: 'cached',
       cached: true,
       viewName
@@ -270,7 +283,7 @@ app.post('/api/repose-character', async (req, res) => {
 
       res.json({
         success: true,
-        imageUrl: `/assets/character/${viewName}.png`,
+        imageUrl: `/assets/character/${pose}/${viewName}.png`,
         remoteUrl: newImageUrl,
         requestId: result.requestId,
         cached: false,
@@ -293,18 +306,145 @@ app.post('/api/repose-character', async (req, res) => {
   }
 });
 
+// API endpoint to generate pose variations from idle
+app.post('/api/generate-pose', async (req, res) => {
+  const { targetPose } = req.body;
+
+  console.log(`[POSE] Generating ${targetPose} pose from idle...`);
+
+  // Check if target pose assets already exist
+  const targetPath = join(CHARACTER_DIR, targetPose, 'front.png');
+  if (REUSE_ASSETS && existsSync(targetPath)) {
+    console.log(`[REUSE] Reusing existing ${targetPose} pose`);
+    res.json({
+      success: true,
+      pose: targetPose,
+      cached: true
+    });
+    return;
+  }
+
+  // Get idle pose images as source
+  const idleFrontPath = join(CHARACTER_DIR, 'idle', 'front.png');
+  if (!existsSync(idleFrontPath)) {
+    res.status(400).json({
+      success: false,
+      error: 'Idle pose not found. Generate idle pose first.'
+    });
+    return;
+  }
+
+  // Define pose prompts
+  const posePrompts = {
+    'walking': 'character in walking pose, mid-stride, one leg forward, arms swinging naturally, same character and style',
+    'shooting': 'character in shooting pose, arms extended forward holding weapon, action pose, same character and style'
+  };
+
+  const prompt = posePrompts[targetPose];
+  if (!prompt) {
+    res.status(400).json({
+      success: false,
+      error: `Unknown pose: ${targetPose}`
+    });
+    return;
+  }
+
+  try {
+    // Read idle front image and upload it to FAL storage for use
+    const idleImageBuffer = readFileSync(idleFrontPath);
+    const idleImageBase64 = `data:image/png;base64,${idleImageBuffer.toString('base64')}`;
+
+    console.log(`[POSE] Transforming idle to ${targetPose}...`);
+
+    // Generate the new pose using image-to-image
+    const result = await fal.subscribe("fal-ai/alpha-image-232/edit-image", {
+      input: {
+        prompt: prompt,
+        image_urls: [idleImageBase64],
+        enable_prompt_expansion: false
+      },
+      logs: true,
+      onQueueUpdate: (update) => {
+        if (update.status === "IN_PROGRESS") {
+          update.logs.map((log) => log.message).forEach(console.log);
+        }
+      },
+    });
+
+    console.log(`[OK] ${targetPose} pose generation complete!`);
+
+    if (result.data && result.data.images && result.data.images.length > 0) {
+      const imageUrl = result.data.images[0].url;
+
+      // Save the front view of the new pose
+      const frontPath = join(CHARACTER_DIR, targetPose, 'front.png');
+      await downloadFile(imageUrl, frontPath);
+      console.log(`[SAVED] ${targetPose} front view saved`);
+
+      // Now generate other views for this pose
+      const views = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
+      const viewPrompts = {
+        'back': `back view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, rear view, same style and design`,
+        'left': `left side view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, profile from left, same style and design`,
+        'right': `right side view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, profile from right, same style and design`,
+        'angle_30': `character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose rotated 30 degrees to the right, three-quarter view, same style and design`,
+        'angle_-30': `character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose rotated 30 degrees to the left, three-quarter view, same style and design`
+      };
+
+      for (const viewName of views) {
+        console.log(`[POSE] Generating ${viewName} view for ${targetPose}...`);
+
+        const viewResult = await fal.subscribe("fal-ai/alpha-image-232/edit-image", {
+          input: {
+            prompt: viewPrompts[viewName],
+            image_urls: [imageUrl]
+          },
+          logs: false
+        });
+
+        if (viewResult.data && viewResult.data.images && viewResult.data.images.length > 0) {
+          const viewImageUrl = viewResult.data.images[0].url;
+          const viewPath = join(CHARACTER_DIR, targetPose, `${viewName}.png`);
+          await downloadFile(viewImageUrl, viewPath);
+          console.log(`[SAVED] ${targetPose} ${viewName} view saved`);
+        }
+      }
+
+      res.json({
+        success: true,
+        pose: targetPose,
+        frontUrl: `/assets/character/${targetPose}/front.png`,
+        cached: false
+      });
+
+    } else {
+      res.status(500).json({
+        success: false,
+        error: 'No images returned from API'
+      });
+    }
+
+  } catch (error) {
+    console.error(`Error generating ${targetPose} pose:`, error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // API endpoint to generate 3D model using Trellis
 app.post('/api/generate-3d-model', async (req, res) => {
-  const { imageUrls } = req.body;
+  const { imageUrls, pose = DEFAULT_POSE } = req.body;
 
-  console.log('[3D MODEL] Generating 3D model from images...');
+  console.log(`[3D MODEL] Generating 3D model for ${pose} pose from images...`);
 
-  const modelPath = join(MODELS_DIR, 'character.glb');
+  const modelPath = join(MODELS_DIR, `character_${pose}.glb`);
   if (REUSE_ASSETS && existsSync(modelPath)) {
     console.log('[REUSE] Reusing existing 3D model');
     res.json({
       success: true,
-      modelUrl: `/assets/models/character.glb`,
+      modelUrl: `/assets/models/character_${pose}.glb`,
       requestId: 'cached',
       cached: true
     });
@@ -336,7 +476,7 @@ app.post('/api/generate-3d-model', async (req, res) => {
 
       res.json({
         success: true,
-        modelUrl: `/assets/models/character.glb`,
+        modelUrl: `/assets/models/character_${pose}.glb`,
         requestId: result.requestId,
         cached: false
       });

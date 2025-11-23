@@ -14,8 +14,8 @@ world.defaultContactMaterial.contactEquationRelaxation = 3;
 
 // Scene setup
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0a0a0a);
-scene.fog = new THREE.Fog(0x0a0a0a, 10, 50);
+scene.background = new THREE.Color(0x87CEEB); // Light blue sky background
+scene.fog = new THREE.Fog(0x87CEEB, 10, 50); // Matching light blue fog
 
 // Camera setup
 const camera = new THREE.PerspectiveCamera(
@@ -37,7 +37,7 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 // Critical for proper lighting and colors with GLTF models
 renderer.outputColorSpace = THREE.SRGBColorSpace; // Proper color rendering
 renderer.toneMapping = THREE.ACESFilmicToneMapping; // Better exposure handling
-renderer.toneMappingExposure = 1.1; // Brightness control (0.5 to 2.0 range)
+renderer.toneMappingExposure = 2.0; // Increased for super bright scene
 
 const container = document.getElementById('canvas-container');
 container.appendChild(renderer.domElement);
@@ -55,17 +55,17 @@ controls.maxPolarAngle = Math.PI / 2; // Don't let camera go below ground
 // Add HemisphereLight for natural ambient gradient
 const hemisphereLight = new THREE.HemisphereLight(
     0x87CEEB, // Sky color (light blue)
-    0x444444, // Ground color (dark gray)
-    0.8       // Intensity
+    0xffffff, // Ground color (white for brighter ground)
+    1.5       // Increased intensity for super bright
 );
 scene.add(hemisphereLight);
 
 // Brighter white ambient light (changed from gray)
-const ambientLight = new THREE.AmbientLight(0xffffff, 0.4); // White ambient for better colors
+const ambientLight = new THREE.AmbientLight(0xffffff, 1.0); // Increased for super bright
 scene.add(ambientLight);
 
 // Main directional light (stronger intensity for better visibility)
-const directionalLight = new THREE.DirectionalLight(0xffffff, 2.0); // Increased from 1.2
+const directionalLight = new THREE.DirectionalLight(0xffffff, 3.0); // Increased for super bright
 directionalLight.position.set(5, 10, 5);
 directionalLight.castShadow = true;
 directionalLight.shadow.mapSize.width = 2048;
@@ -80,18 +80,61 @@ directionalLight.shadow.camera.bottom = -10;
 scene.add(directionalLight);
 
 // Single fill light instead of multiple directions (prevents washing out)
-const fillLight = new THREE.DirectionalLight(0xffffff, 0.5);
+const fillLight = new THREE.DirectionalLight(0xffffff, 1.5); // Increased for super bright
 fillLight.position.set(-3, 5, 2);
 scene.add(fillLight);
 
 // Add some colored accent lights for sci-fi effect (animated)
-const blueLight = new THREE.PointLight(0x00d4ff, 1.5, 20);
+const blueLight = new THREE.PointLight(0x00d4ff, 2.5, 20); // Increased intensity
 blueLight.position.set(-5, 3, -5);
 scene.add(blueLight);
 
-const purpleLight = new THREE.PointLight(0xb400ff, 1.5, 20);
+const purpleLight = new THREE.PointLight(0xb400ff, 2.5, 20); // Increased intensity
 purpleLight.position.set(5, 3, 5);
 scene.add(purpleLight);
+
+// Four powerful directional lights at ground level pointing inward
+// North light (positive Z direction)
+const northLight = new THREE.DirectionalLight(0xffffff, 2.5);
+northLight.position.set(0, 1, 10); // At ground level, far north
+northLight.target.position.set(0, 0, 0); // Point at center
+scene.add(northLight);
+scene.add(northLight.target);
+
+// South light (negative Z direction)
+const southLight = new THREE.DirectionalLight(0xffffff, 2.5);
+southLight.position.set(0, 1, -10); // At ground level, far south
+southLight.target.position.set(0, 0, 0); // Point at center
+scene.add(southLight);
+scene.add(southLight.target);
+
+// East light (positive X direction)
+const eastLight = new THREE.DirectionalLight(0xffffff, 2.5);
+eastLight.position.set(10, 1, 0); // At ground level, far east
+eastLight.target.position.set(0, 0, 0); // Point at center
+scene.add(eastLight);
+scene.add(eastLight.target);
+
+// West light (negative X direction)
+const westLight = new THREE.DirectionalLight(0xffffff, 2.5);
+westLight.position.set(-10, 1, 0); // At ground level, far west
+westLight.target.position.set(0, 0, 0); // Point at center
+scene.add(westLight);
+scene.add(westLight.target);
+
+// Ring of 8 point lights around the scene at character height for complete coverage
+const ringRadius = 8;
+const numRingLights = 8;
+for (let i = 0; i < numRingLights; i++) {
+    const angle = (i / numRingLights) * Math.PI * 2;
+    const pointLight = new THREE.PointLight(0xffffff, 2.0, 15);
+    pointLight.position.set(
+        Math.cos(angle) * ringRadius,
+        2, // Character height
+        Math.sin(angle) * ringRadius
+    );
+    scene.add(pointLight);
+}
 
 // Loaders
 const textureLoader = new THREE.TextureLoader();
@@ -104,6 +147,7 @@ let groundBody;
 let groundMaterial; // Store ground material globally
 let characterModel;
 let characterBody;
+let currentPose = 'idle'; // Track current pose
 
 // Physics visualization helpers
 let characterBoxHelper;
@@ -170,6 +214,61 @@ function createGround(texture) {
     scene.add(groundBoxHelper);
 
     console.log('[OK] Ground created successfully with physics!');
+}
+
+// Function to load a different pose model (all models are pre-generated at startup)
+async function loadPoseModel(pose) {
+    if (pose === currentPose) {
+        console.log(`[POSE] Already using ${pose} pose`);
+        return;
+    }
+
+    console.log(`[POSE] Switching to ${pose} pose...`);
+
+    try {
+        // Check if pose model exists (should always exist after startup generation)
+        const checkResponse = await fetch(`http://localhost:8081/assets/models/character_${pose}.glb`);
+
+        if (!checkResponse.ok) {
+            console.error(`[POSE] ${pose} model not found! It should have been generated at startup.`);
+            throw new Error(`${pose} model not available`);
+        }
+
+        // Remove old character model
+        if (characterModel) {
+            scene.remove(characterModel);
+            if (characterModel.userData.axesHelper) {
+                scene.remove(characterModel.userData.axesHelper);
+            }
+            if (characterModel.userData.arrowHelper) {
+                scene.remove(characterModel.userData.arrowHelper);
+            }
+            if (characterModel.userData.boxHelper) {
+                scene.remove(characterModel.userData.boxHelper);
+            }
+        }
+
+        // Remove old physics body
+        if (characterBody) {
+            world.removeBody(characterBody);
+        }
+
+        // Load the new model
+        await loadCharacterModel(`/assets/models/character_${pose}.glb?t=${Date.now()}`);
+
+        currentPose = pose;
+        console.log(`[POSE] Successfully switched to ${pose} pose`);
+
+        // Update UI to show current pose
+        const poseModeElement = document.getElementById('pose-mode');
+        if (poseModeElement) {
+            poseModeElement.textContent = pose.toUpperCase();
+        }
+
+    } catch (error) {
+        console.error(`Error loading ${pose} pose:`, error);
+        console.error(`[POSE] Error: ${error.message}`);
+    }
 }
 
 // Load 3D character model
@@ -375,7 +474,8 @@ async function generateAllAssets() {
 
         const characterResponse = await fetch('http://localhost:8081/api/generate-character', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pose: 'idle' })
         });
 
         const characterData = await characterResponse.json();
@@ -400,7 +500,8 @@ async function generateAllAssets() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                     imageUrl: characterImageUrl,
-                    viewName: viewName
+                    viewName: viewName,
+                    pose: 'idle'
                 })
             });
 
@@ -414,31 +515,106 @@ async function generateAllAssets() {
             viewUrls.push(reposeData.remoteUrl || reposeData.imageUrl);
         }
 
-        // Step 4: Generate 3D model using Trellis
-        updateLoadingUI('🎲 Generating 3D model...', 'Converting images to 3D (this may take a while)');
-        console.log('🎲 Step 4: Generating 3D model from views...');
-        console.log('Image URLs for Trellis:', viewUrls);
+        // Step 4: Generate 3D model for idle pose
+        updateLoadingUI('🎲 Generating idle 3D model...', 'Converting images to 3D (1/3)');
+        console.log('🎲 Step 4: Generating idle 3D model from views...');
 
-        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+        const idleModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                imageUrls: viewUrls.slice(0, 6) // Trellis accepts up to 6 images
+                imageUrls: viewUrls.slice(0, 6), // Trellis accepts up to 6 images
+                pose: 'idle'
             })
         });
 
-        const modelData = await modelResponse.json();
-        if (!modelData.success) throw new Error(modelData.error || 'Failed to generate 3D model');
+        const idleModelData = await idleModelResponse.json();
+        if (!idleModelData.success) throw new Error(idleModelData.error || 'Failed to generate idle 3D model');
+        console.log(`✅ Idle 3D model ${idleModelData.cached ? 'loaded from cache' : 'generated'}`);
 
-        console.log(`✅ 3D model ${modelData.cached ? 'loaded from cache' : 'generated'}`);
+        // Step 5: Generate walking pose from idle
+        updateLoadingUI('🚶 Generating walking pose...', 'Creating walking variations');
+        console.log('🚶 Step 5: Generating walking pose from idle...');
 
-        // Step 5: Load the 3D model
+        const walkingResponse = await fetch('http://localhost:8081/api/generate-pose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetPose: 'walking' })
+        });
+
+        const walkingData = await walkingResponse.json();
+        if (!walkingData.success) {
+            console.warn('⚠️ Failed to generate walking pose, continuing...');
+        } else {
+            console.log(`✅ Walking pose ${walkingData.cached ? 'loaded from cache' : 'generated'}`);
+
+            // Generate 3D model for walking pose
+            updateLoadingUI('🎲 Generating walking 3D model...', 'Converting images to 3D (2/3)');
+            const walkingViews = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
+            const walkingUrls = walkingViews.map(view =>
+                `http://localhost:8081/assets/character/walking/${view}.png`
+            );
+
+            const walkingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imageUrls: walkingUrls,
+                    pose: 'walking'
+                })
+            });
+
+            const walkingModelData = await walkingModelResponse.json();
+            if (walkingModelData.success) {
+                console.log(`✅ Walking 3D model ${walkingModelData.cached ? 'loaded from cache' : 'generated'}`);
+            }
+        }
+
+        // Step 6: Generate shooting pose from idle
+        updateLoadingUI('🔫 Generating shooting pose...', 'Creating shooting variations');
+        console.log('🔫 Step 6: Generating shooting pose from idle...');
+
+        const shootingResponse = await fetch('http://localhost:8081/api/generate-pose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ targetPose: 'shooting' })
+        });
+
+        const shootingData = await shootingResponse.json();
+        if (!shootingData.success) {
+            console.warn('⚠️ Failed to generate shooting pose, continuing...');
+        } else {
+            console.log(`✅ Shooting pose ${shootingData.cached ? 'loaded from cache' : 'generated'}`);
+
+            // Generate 3D model for shooting pose
+            updateLoadingUI('🎲 Generating shooting 3D model...', 'Converting images to 3D (3/3)');
+            const shootingViews = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
+            const shootingUrls = shootingViews.map(view =>
+                `http://localhost:8081/assets/character/shooting/${view}.png`
+            );
+
+            const shootingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    imageUrls: shootingUrls,
+                    pose: 'shooting'
+                })
+            });
+
+            const shootingModelData = await shootingModelResponse.json();
+            if (shootingModelData.success) {
+                console.log(`✅ Shooting 3D model ${shootingModelData.cached ? 'loaded from cache' : 'generated'}`);
+            }
+        }
+
+        // Step 7: Load the idle 3D model to start
         updateLoadingUI('📦 Loading 3D character...', 'Preparing scene');
-        await loadCharacterModel(modelData.modelUrl + '?t=' + Date.now());
+        await loadCharacterModel(idleModelData.modelUrl + '?t=' + Date.now());
 
         // All done!
         loadingElement.classList.add('hidden');
-        console.log('🎉 All assets loaded successfully!');
+        console.log('🎉 All assets and poses loaded successfully!');
 
     } catch (error) {
         console.error('❌ Error in generation pipeline:', error);
@@ -804,6 +980,17 @@ window.addEventListener('keydown', (event) => {
         document.getElementById('helpers-visible').textContent = helpersVisible ? 'Yes' : 'No';
 
         console.log(`[DEBUG] All UI, helpers, and physics boxes ${debugInfoVisible ? 'shown' : 'hidden'}`);
+    }
+
+    // Pose switching controls (number keys 1-3)
+    if (key === '1' && gameplayMode) {
+        loadPoseModel('idle');
+    }
+    if (key === '2' && gameplayMode) {
+        loadPoseModel('walking');
+    }
+    if (key === '3' && gameplayMode) {
+        loadPoseModel('shooting');
     }
 });
 
