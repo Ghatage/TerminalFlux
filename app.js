@@ -1542,7 +1542,7 @@ async function generateRiddlePuzzle(sessionId) {
     console.log('[RIDDLE] Generating riddle puzzle...');
 
     try {
-        const response = await fetch('http://localhost:8081/api/generate-riddle-puzzle', {
+        const response = await fetch('/api/generate-riddle-puzzle', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ sessionId: sessionId })
@@ -1587,7 +1587,7 @@ async function generatePuzzleObject(objectDesc, objectType, objectIndex, session
         // Step 0: Generate lore-friendly description via Claude
         const llmPrompt = `Given this object description: "${objectDesc.description}", create a lore-friendly atmospheric description (2-3 sentences) that explains what this object is and why a player might encounter it in their adventure. Make it mysterious and engaging.`;
 
-        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+        const llmResponse = await fetch('/api/llm/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: llmPrompt })
@@ -1600,7 +1600,7 @@ async function generatePuzzleObject(objectDesc, objectType, objectIndex, session
         // Step 1: Generate image with white background
         const imagePrompt = `Ultra high quality 3D object, ${objectDesc.description}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
 
-        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+        const imageResponse = await fetch('/api/generate-character', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1624,7 +1624,7 @@ async function generatePuzzleObject(objectDesc, objectType, objectIndex, session
         }
 
         // Step 2: Generate 3D model with Trellis (single image) - use REMOTE URL only
-        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+        const modelResponse = await fetch('/api/generate-3d-model', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1836,7 +1836,7 @@ async function createSinglePoster(prompt, position, rotation, sessionId, filenam
 
     try {
         // Generate meme image via API
-        const response = await fetch('http://localhost:8081/api/generate-meme', {
+        const response = await fetch('/api/generate-meme', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -1945,7 +1945,7 @@ async function loadAndPlaceMemes(sessionId) {
 
     try {
         // Query database for meme poster assets
-        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}/assets`);
+        const response = await fetch(`/api/sessions/${sessionId}/assets`);
         const data = await response.json();
 
         if (!data.success || !data.assets) {
@@ -2057,7 +2057,7 @@ Be specific and creative.`
 
 Be specific and creative.`;
 
-        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+        const llmResponse = await fetch('/api/llm/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: llmPrompt })
@@ -2079,7 +2079,7 @@ Be specific and creative.`;
         // Step 2: Generate image with white background
         const imagePrompt = `Ultra high quality 3D ${objectType === 'tree' ? 'tree' : 'object'}, ${objectDescription}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
 
-        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+        const imageResponse = await fetch('/api/generate-character', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2103,7 +2103,7 @@ Be specific and creative.`;
         }
 
         // Step 3: Generate 3D model with Trellis (single image) - use REMOTE URL only
-        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+        const modelResponse = await fetch('/api/generate-3d-model', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2149,7 +2149,7 @@ async function createCharacterThemedObject(character, sessionId, objectIndex) {
 
 Make the object unique and thematically appropriate to the character.`;
 
-        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+        const llmResponse = await fetch('/api/llm/query', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ prompt: llmPrompt })
@@ -2167,7 +2167,7 @@ Make the object unique and thematically appropriate to the character.`;
         // Step 2: Generate image with white background
         const imagePrompt = `Ultra high quality 3D object, ${objectDescription}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
 
-        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+        const imageResponse = await fetch('/api/generate-character', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2191,7 +2191,7 @@ Make the object unique and thematically appropriate to the character.`;
         }
 
         // Step 3: Generate 3D model with Trellis - use REMOTE URL only
-        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+        const modelResponse = await fetch('/api/generate-3d-model', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -2384,7 +2384,7 @@ async function loadPoseModel(pose) {
         const modelPath = currentSessionId
             ? `/assets/${currentSessionId}/models/character_${pose}.glb`
             : `/assets/models/character_${pose}.glb`;
-        const checkResponse = await fetch(`http://localhost:8081${modelPath}`);
+        const checkResponse = await fetch(`${modelPath}`);
 
         if (!checkResponse.ok) {
             console.error(`[POSE] ${pose} model not found! It should have been generated at startup.`);
@@ -2705,7 +2705,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         const phase1Results = await parallelFetch([
             {
                 type: 'ground',
-                url: 'http://localhost:8081/api/generate-texture',
+                url: '/api/generate-texture',
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2714,7 +2714,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
             },
             {
                 type: 'idle-base',
-                url: 'http://localhost:8081/api/generate-character',
+                url: '/api/generate-character',
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2784,7 +2784,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         const phase2Requests = views.map(viewName => ({
             type: 'idle-view',
             meta: { viewName },
-            url: 'http://localhost:8081/api/generate-view',
+            url: '/api/generate-view',
             options: {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -2834,7 +2834,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         const phase3Results = await parallelFetch([
             {
                 type: 'idle-3d',
-                url: 'http://localhost:8081/api/generate-3d-model',
+                url: '/api/generate-3d-model',
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2848,7 +2848,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
             },
             {
                 type: 'walking-base',
-                url: 'http://localhost:8081/api/generate-pose',
+                url: '/api/generate-pose',
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -2858,7 +2858,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
             // SHOOTING POSE GENERATION DISABLED
             // {
             //     type: 'shooting-base',
-            //     url: 'http://localhost:8081/api/generate-pose',
+            //     url: '/api/generate-pose',
             //     options: {
             //         method: 'POST',
             //         headers: { 'Content-Type': 'application/json' },
@@ -2978,7 +2978,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                 phase4Requests.push({
                     type: 'walking-view',
                     meta: { viewName },
-                    url: 'http://localhost:8081/api/generate-view',
+                    url: '/api/generate-view',
                     options: {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -3000,7 +3000,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         //         phase4Requests.push({
         //             type: 'shooting-view',
         //             meta: { viewName },
-        //             url: 'http://localhost:8081/api/generate-view',
+        //             url: '/api/generate-view',
         //             options: {
         //                 method: 'POST',
         //                 headers: { 'Content-Type': 'application/json' },
@@ -3061,7 +3061,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         if (walkingViewUrls.length >= 3) {
             phase4ModelRequests.push({
                 type: 'walking-3d',
-                url: 'http://localhost:8081/api/generate-3d-model',
+                url: '/api/generate-3d-model',
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -3079,7 +3079,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         // if (shootingViewUrls.length >= 3) {
         //     phase4ModelRequests.push({
         //         type: 'shooting-3d',
-        //         url: 'http://localhost:8081/api/generate-3d-model',
+        //         url: '/api/generate-3d-model',
         //         options: {
         //             method: 'POST',
         //             headers: { 'Content-Type': 'application/json' },
@@ -3689,7 +3689,7 @@ window.addEventListener('keydown', (event) => {
 // Session management functions
 async function loadSessions() {
     try {
-        const response = await fetch('http://localhost:8081/api/sessions');
+        const response = await fetch('/api/sessions');
         const data = await response.json();
         if (data.success) {
             return data.sessions;
@@ -3702,7 +3702,7 @@ async function loadSessions() {
 
 async function createSession(character, modelType, playerMode) {
     try {
-        const response = await fetch('http://localhost:8081/api/sessions/create', {
+        const response = await fetch('/api/sessions/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ character, modelType, playerMode })
@@ -3719,7 +3719,7 @@ async function createSession(character, modelType, playerMode) {
 
 async function loadSession(sessionId) {
     try {
-        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}`);
+        const response = await fetch(`/api/sessions/${sessionId}`);
         const data = await response.json();
         if (data.success) {
             return data.session;
@@ -3732,7 +3732,7 @@ async function loadSession(sessionId) {
 
 async function deleteSession(sessionId) {
     try {
-        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}`, {
+        const response = await fetch(`/api/sessions/${sessionId}`, {
             method: 'DELETE'
         });
         const data = await response.json();
@@ -3749,7 +3749,7 @@ async function checkAndLoadSessionAssets(sessionId) {
         console.log(`[SESSION] Checking assets for session: ${sessionId}`);
 
         // Check if session assets exist
-        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}/assets`);
+        const response = await fetch(`/api/sessions/${sessionId}/assets`);
         const data = await response.json();
 
         if (!data.success || !data.assets || data.assets.length === 0) {
@@ -3764,7 +3764,7 @@ async function checkAndLoadSessionAssets(sessionId) {
         const hasGround = data.assets.some(a => a.asset_type === 'ground');
         // Check if idle model exists in the file system (not database, since models aren't recorded yet)
         const modelPath = `/assets/${sessionId}/models/character_idle.glb`;
-        const modelCheckResponse = await fetch(`http://localhost:8081${modelPath}`, { method: 'HEAD' });
+        const modelCheckResponse = await fetch(`${modelPath}`, { method: 'HEAD' });
         const hasIdleModel = modelCheckResponse.ok;
 
         console.log(`[SESSION] Has ground texture: ${hasGround}`);
@@ -3837,7 +3837,7 @@ async function checkAndLoadSessionAssets(sessionId) {
 
         // Load riddle puzzle if it exists in session metadata
         console.log('[SESSION] Checking for riddle puzzle...');
-        const session = await fetch(`http://localhost:8081/api/sessions/${sessionId}`).then(r => r.json());
+        const session = await fetch(`/api/sessions/${sessionId}`).then(r => r.json());
         if (session.success && session.session && session.session.metadata) {
             try {
                 const metadata = JSON.parse(session.session.metadata);
@@ -3849,7 +3849,7 @@ async function checkAndLoadSessionAssets(sessionId) {
                     const puzzleObjectPaths = [];
                     for (let i = 0; i < 5; i++) {
                         const modelPath = `/assets/${sessionId}/models/character_puzzle_object_${i}.glb`;
-                        const checkResponse = await fetch(`http://localhost:8081${modelPath}`, { method: 'HEAD' });
+                        const checkResponse = await fetch(`${modelPath}`, { method: 'HEAD' });
                         if (checkResponse.ok) {
                             puzzleObjectPaths.push(modelPath);
                         }

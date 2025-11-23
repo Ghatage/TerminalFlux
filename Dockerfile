@@ -53,15 +53,16 @@ COPY database/ ./database/
 COPY services/ ./services/
 COPY utils/ ./utils/
 
-# Copy static assets (models and music)
+# Copy ALL static assets (models, music)
 COPY assets/models/ ./assets/models/
 COPY assets/music/ ./assets/music/
 
 # Copy legacy ground texture if it exists
 COPY ground-texture.png ./ground-texture.png
 
-# Create directories for dynamic content (will be mounted as volumes)
-RUN mkdir -p /app/assets /app/database && \
+# Create directories for dynamic content
+# sessions/ will be the volume mount point for generated assets
+RUN mkdir -p /app/assets/sessions /app/database && \
     chmod -R 755 /app/assets /app/database
 
 # Expose port 8081
