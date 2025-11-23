@@ -91,6 +91,38 @@
             border-radius: 16px;
             border: 2px solid #00d4ff;
             box-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
+            width: 600px;  /* Fixed width */
+            max-width: 90vw;  /* Responsive max */
+            max-height: 80vh;
+            display: flex;
+            flex-direction: column;
+            position: relative;  /* For close button positioning */
+        }
+
+        .loading-close-btn {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 30px;
+            height: 30px;
+            background: rgba(255, 0, 0, 0.2);
+            border: 2px solid #ff4444;
+            border-radius: 50%;
+            color: #ff4444;
+            font-size: 20px;
+            font-weight: bold;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 1;
+        }
+
+        .loading-close-btn:hover {
+            background: rgba(255, 0, 0, 0.4);
+            color: #ffffff;
+            transform: rotate(90deg);
         }
 
         /* Character Selection Modal */
@@ -278,6 +310,156 @@
         .hidden {
             display: none;
         }
+
+        /* Image Gallery in Loading Modal */
+        .image-gallery {
+            margin-top: 20px;
+            padding: 15px 0;
+            border-top: 1px solid rgba(0, 212, 255, 0.3);
+            max-width: 100%;
+            overflow-x: auto;
+            overflow-y: hidden;
+        }
+
+        .image-gallery-title {
+            font-size: 14px;
+            color: #00d4ff;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .image-gallery-scroll {
+            display: flex;
+            gap: 10px;
+            padding: 10px 0;
+            min-height: 120px;
+        }
+
+        .image-thumbnail {
+            flex-shrink: 0;
+            width: 100px;
+            height: 100px;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            background: rgba(0, 0, 0, 0.5);
+            position: relative;
+        }
+
+        .image-thumbnail:hover {
+            border-color: #00d4ff;
+            transform: scale(1.05);
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.5);
+        }
+
+        .image-thumbnail img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+
+        .image-thumbnail-label {
+            position: absolute;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: rgba(0, 0, 0, 0.8);
+            color: #00d4ff;
+            font-size: 10px;
+            padding: 2px;
+            text-align: center;
+        }
+
+        /* Custom scrollbar for gallery */
+        .image-gallery-scroll::-webkit-scrollbar {
+            height: 8px;
+        }
+
+        .image-gallery-scroll::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+            border-radius: 4px;
+        }
+
+        .image-gallery-scroll::-webkit-scrollbar-thumb {
+            background: rgba(0, 212, 255, 0.5);
+            border-radius: 4px;
+        }
+
+        .image-gallery-scroll::-webkit-scrollbar-thumb:hover {
+            background: #00d4ff;
+        }
+
+        /* Full-size Image Viewer Modal */
+        #image-viewer-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 103;
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+
+        #image-viewer-modal.hidden {
+            display: none;
+            opacity: 0;
+        }
+
+        .image-viewer-content {
+            position: relative;
+            max-width: 90vw;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .image-viewer-close {
+            position: absolute;
+            top: -40px;
+            right: 0;
+            width: 40px;
+            height: 40px;
+            background: rgba(0, 0, 0, 0.8);
+            border: 2px solid #00d4ff;
+            border-radius: 50%;
+            color: #00d4ff;
+            font-size: 24px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.3s ease;
+            z-index: 1;
+        }
+
+        .image-viewer-close:hover {
+            background: #00d4ff;
+            color: #000;
+            transform: rotate(90deg);
+        }
+
+        .image-viewer-img {
+            max-width: 100%;
+            max-height: calc(90vh - 60px);
+            border: 2px solid #00d4ff;
+            border-radius: 8px;
+            box-shadow: 0 0 50px rgba(0, 212, 255, 0.5);
+        }
+
+        .image-viewer-title {
+            margin-top: 10px;
+            color: #00d4ff;
+            font-size: 16px;
+            text-align: center;
+        }
     </style>
 </head>
 <body>
@@ -323,9 +505,25 @@
     </div>
 
     <div id="loading" class="hidden">
-        <div class="spinner"></div>
-        <p>Initializing...</p>
-        <p style="font-size: 14px; margin-top: 10px;">Starting up</p>
+        <button id="loading-close" class="loading-close-btn">×</button>
+        <div>
+            <div class="spinner"></div>
+            <p>Initializing...</p>
+            <p style="font-size: 14px; margin-top: 10px;">Starting up</p>
+        </div>
+        <div class="image-gallery hidden" id="loading-gallery">
+            <div class="image-gallery-title">Generated Images</div>
+            <div class="image-gallery-scroll" id="gallery-scroll"></div>
+        </div>
+    </div>
+
+    <!-- Full-size Image Viewer Modal -->
+    <div id="image-viewer-modal" class="hidden">
+        <div class="image-viewer-content">
+            <div class="image-viewer-close" id="image-viewer-close">×</div>
+            <img id="image-viewer-img" class="image-viewer-img" src="" alt="">
+            <div id="image-viewer-title" class="image-viewer-title"></div>
+        </div>
     </div>
 
     <div id="info">
@@ -337,7 +535,8 @@
         <p>R/T: Rotate Character</p>
         <p>S: Save & Start Game</p>
         <p style="margin-top: 10px;"><strong>Gameplay:</strong></p>
-        <p>W/A/S/D: Move Character</p>
+        <p>W/S: Move Forward/Backward</p>
+        <p>A/D: Rotate Left/Right</p>
         <p>SPACE: Jump</p>
         <p style="margin-top: 10px;"><strong>Pose Switching:</strong></p>
         <p>1: Idle Pose</p>
@@ -351,7 +550,7 @@
         <p>I: Toggle All UI & Visualizations</p>
     </div>
 
-    <div id="debug-info">
+    <div id="debug-info" style="display: none;">
         <h3>Debug Info</h3>
         <div class="info-line">
             <span class="label">Game Mode:</span>
@@ -379,7 +578,7 @@
         </div>
         <div class="info-line">
             <span class="label">Helpers Visible:</span>
-            <span class="value" id="helpers-visible">Yes</span>
+            <span class="value" id="helpers-visible">No</span>
         </div>
     </div>
 

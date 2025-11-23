@@ -161,14 +161,112 @@ let currentPose = 'idle'; // Track current pose
 let characterBoxHelper;
 let groundBoxHelper;
 
+// Store generated images for display
+const generatedImages = [];
+
 // Function to update loading UI
 function updateLoadingUI(message, submessage = '', showSpinner = true) {
-    loadingElement.innerHTML = `
+    const loadingContent = loadingElement.querySelector('div:first-child') || loadingElement;
+    loadingContent.innerHTML = `
         ${showSpinner ? '<div class="spinner"></div>' : ''}
         <p>${message}</p>
         ${submessage ? `<p style="font-size: 14px; margin-top: 10px;">${submessage}</p>` : ''}
     `;
 }
+
+// Function to add image to gallery
+function addImageToGallery(imageUrl, label) {
+    generatedImages.push({ url: imageUrl, label: label });
+
+    const gallery = document.getElementById('loading-gallery');
+    const galleryScroll = document.getElementById('gallery-scroll');
+
+    // Show gallery if hidden
+    if (gallery.classList.contains('hidden')) {
+        gallery.classList.remove('hidden');
+    }
+
+    // Create thumbnail element
+    const thumbnail = document.createElement('div');
+    thumbnail.className = 'image-thumbnail';
+    thumbnail.innerHTML = `
+        <img src="${imageUrl}" alt="${label}">
+        <div class="image-thumbnail-label">${label}</div>
+    `;
+
+    // Add click handler
+    thumbnail.addEventListener('click', () => {
+        showFullSizeImage(imageUrl, label);
+    });
+
+    galleryScroll.appendChild(thumbnail);
+
+    // Auto-scroll to show latest image
+    galleryScroll.scrollLeft = galleryScroll.scrollWidth;
+}
+
+// Function to show full-size image
+function showFullSizeImage(imageUrl, label) {
+    const modal = document.getElementById('image-viewer-modal');
+    const img = document.getElementById('image-viewer-img');
+    const title = document.getElementById('image-viewer-title');
+
+    img.src = imageUrl;
+    title.textContent = label;
+    modal.classList.remove('hidden');
+}
+
+// Set up image viewer modal close handlers
+document.addEventListener('DOMContentLoaded', () => {
+    const imageViewerModal = document.getElementById('image-viewer-modal');
+    const closeBtn = document.getElementById('image-viewer-close');
+    const loadingModal = document.getElementById('loading');
+    const loadingCloseBtn = document.getElementById('loading-close');
+
+    // Close on X button click for image viewer
+    if (closeBtn) {
+        closeBtn.addEventListener('click', () => {
+            imageViewerModal.classList.add('hidden');
+        });
+    }
+
+    // Add close handler for loading modal
+    if (loadingCloseBtn) {
+        loadingCloseBtn.addEventListener('click', () => {
+            console.log('[UI] Force closing loading modal via X button');
+            loadingModal.classList.add('hidden');
+            loadingModal.style.display = 'none'; // Force hide with inline style
+
+            // Also stop any pending operations if needed
+            if (window.generationInProgress) {
+                window.generationInProgress = false;
+                console.log('[UI] Stopped generation process');
+            }
+        });
+    }
+
+    // Close on ESC key
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            if (!imageViewerModal.classList.contains('hidden')) {
+                imageViewerModal.classList.add('hidden');
+            }
+            // Also allow ESC to close loading modal
+            if (!loadingModal.classList.contains('hidden')) {
+                console.log('[UI] Closing loading modal via ESC key');
+                loadingModal.classList.add('hidden');
+                loadingModal.style.display = 'none';
+            }
+        }
+    });
+
+    // Close on background click
+    imageViewerModal.addEventListener('click', (event) => {
+        if (event.target === imageViewerModal) {
+            imageViewerModal.classList.add('hidden');
+        }
+    });
+});
 
 // Create ground plane
 function createGround(texture) {
@@ -227,11 +325,11 @@ function createGround(texture) {
 // Function to load a different pose model (all models are pre-generated at startup)
 async function loadPoseModel(pose) {
     if (pose === currentPose) {
-        console.log(`[POSE] Already using ${pose} pose`);
+        // Already using this pose, skip
         return;
     }
 
-    console.log(`[POSE] Switching to ${pose} pose...`);
+    // Switching to new pose
 
     try {
         // Check if pose model exists (should always exist after startup generation)
@@ -242,18 +340,60 @@ async function loadPoseModel(pose) {
             throw new Error(`${pose} model not available`);
         }
 
-        // Remove old character model
+        // Save current physics position and velocity before removing
+        let savedPosition = null;
+        let savedVelocity = null;
+        let savedRotation = null;
+
+        if (characterBody) {
+            savedPosition = characterBody.position.clone();
+            savedVelocity = characterBody.velocity.clone();
+        }
         if (characterModel) {
+            savedRotation = characterModel.rotation.y;
+        }
+
+        // Remove old character model and dispose of resources
+        if (characterModel) {
+            // Remove from scene
             scene.remove(characterModel);
+
+            // Dispose of helpers
             if (characterModel.userData.axesHelper) {
                 scene.remove(characterModel.userData.axesHelper);
+                characterModel.userData.axesHelper.geometry?.dispose();
+                characterModel.userData.axesHelper.material?.dispose();
             }
             if (characterModel.userData.arrowHelper) {
                 scene.remove(characterModel.userData.arrowHelper);
+                // ArrowHelper has multiple children
+                characterModel.userData.arrowHelper.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
             }
             if (characterModel.userData.boxHelper) {
                 scene.remove(characterModel.userData.boxHelper);
+                characterModel.userData.boxHelper.geometry?.dispose();
+                characterModel.userData.boxHelper.material?.dispose();
             }
+
+            // Dispose of the model itself
+            characterModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry?.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                }
+            });
+
+            // Clear reference
+            characterModel = null;
         }
 
         // Remove old physics body
@@ -264,8 +404,17 @@ async function loadPoseModel(pose) {
         // Load the new model
         await loadCharacterModel(`/assets/models/character_${pose}.glb?t=${Date.now()}`);
 
+        // Restore physics position and velocity after loading new model
+        if (savedPosition && characterBody) {
+            characterBody.position.copy(savedPosition);
+            characterBody.velocity.copy(savedVelocity);
+        }
+        if (savedRotation !== null && characterModel) {
+            characterModel.rotation.y = savedRotation;
+        }
+
         currentPose = pose;
-        console.log(`[POSE] Successfully switched to ${pose} pose`);
+        // Successfully switched to new pose
 
         // Update UI to show current pose
         const poseModeElement = document.getElementById('pose-mode');
@@ -331,6 +480,7 @@ function loadCharacterModel(modelUrl) {
                 // Add axes helper to visualize orientation (FIXED IN WORLD SPACE)
                 const axesHelper = new THREE.AxesHelper(2);
                 axesHelper.position.copy(characterModel.position);
+                axesHelper.visible = helpersVisible; // Set initial visibility based on current state
                 scene.add(axesHelper); // Add to scene, not to model
                 console.log('[DEBUG] Added AxesHelper to scene (fixed orientation)');
 
@@ -344,6 +494,7 @@ function loadCharacterModel(modelUrl) {
                 const arrowLength = 1.5;
                 const arrowColor = 0xffff00; // Bright yellow
                 const arrowHelper = new THREE.ArrowHelper(forwardDir, arrowOrigin, arrowLength, arrowColor, 0.3, 0.2);
+                arrowHelper.visible = helpersVisible; // Set initial visibility based on current state
                 scene.add(arrowHelper); // Add to scene, not to model
                 console.log('[DEBUG] Added ArrowHelper to scene (fixed orientation)');
 
@@ -499,6 +650,17 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
 
         console.log(`✅ Phase 1 complete: Ground ${groundData.cached ? 'cached' : 'generated'}, Idle ${idleBaseData.cached ? 'cached' : 'generated'}`);
 
+        // Add ground texture to gallery
+        if (groundData.imageUrl) {
+            addImageToGallery(groundData.imageUrl, 'Ground Texture');
+        }
+
+        // Add idle front image to gallery
+        if (idleBaseData.imageUrl || idleBaseData.remoteUrl) {
+            const url = idleBaseData.imageUrl || idleBaseData.remoteUrl;
+            addImageToGallery(url, 'Character - Idle Front');
+        }
+
         // Load and create ground while Phase 2 is running
         const groundTexturePromise = new Promise((resolve, reject) => {
             textureLoader.load(
@@ -540,8 +702,12 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         for (const viewName of viewOrder) {
             const viewResult = phase2Results.find(r => r._requestMeta?.viewName === viewName);
             if (viewResult?.success) {
-                idleViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+                const viewUrl = viewResult.remoteUrl || viewResult.imageUrl;
+                idleViewUrls.push(viewUrl);
                 console.log(`✅ Idle ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
+                // Add to gallery
+                const friendlyName = viewName.replace('_', ' ').replace('-', ' ');
+                addImageToGallery(viewUrl, `Idle - ${friendlyName}`);
             } else {
                 console.warn(`⚠️ Failed to generate idle ${viewName} view`);
             }
@@ -563,7 +729,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        imageUrls: idleViewUrls.slice(0, 5),  // Changed from 6 to 5 (new API limit)
+                        imageUrls: userModelType === 'trellis' ? idleViewUrls.slice(0, 6) : idleViewUrls.slice(0, 5),  // Trellis supports 6, Rodin supports 5
                         pose: 'idle',
                         modelType: userModelType  // Pass selected model type
                     })
@@ -602,7 +768,11 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         // const shootingImageUrl = shootingBaseData?.success ? (shootingBaseData.remoteUrl || shootingBaseData.imageUrl) : null;
         const shootingImageUrl = null; // Shooting pose disabled
 
-        if (walkingImageUrl) console.log(`✅ Walking base ${walkingBaseData.cached ? 'cached' : 'generated'}`);
+        if (walkingImageUrl) {
+            console.log(`✅ Walking base ${walkingBaseData.cached ? 'cached' : 'generated'}`);
+            // Add walking base to gallery
+            addImageToGallery(walkingImageUrl, 'Character - Walking Front');
+        }
         // if (shootingImageUrl) console.log(`✅ Shooting base ${shootingBaseData.cached ? 'cached' : 'generated'}`);
 
         // ==================== PHASE 4: All Views + 3D Models (12 Parallel) ====================
@@ -667,8 +837,12 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                         r._requestType === 'walking-view' && r._requestMeta?.viewName === viewName
                     );
                     if (viewResult?.success) {
-                        walkingViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+                        const viewUrl = viewResult.remoteUrl || viewResult.imageUrl;
+                        walkingViewUrls.push(viewUrl);
                         console.log(`✅ Walking ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
+                        // Add to gallery
+                        const friendlyName = viewName.replace('_', ' ').replace('-', ' ');
+                        addImageToGallery(viewUrl, `Walking - ${friendlyName}`);
                     }
                 }
             }
@@ -700,7 +874,7 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        imageUrls: walkingViewUrls.slice(0, 5),  // Changed from 6 to 5 (new API limit)
+                        imageUrls: userModelType === 'trellis' ? walkingViewUrls.slice(0, 6) : walkingViewUrls.slice(0, 5),  // Trellis supports 6, Rodin supports 5
                         pose: 'walking',
                         modelType: userModelType  // Pass selected model type
                     })
@@ -738,14 +912,23 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
 
         // ==================== FINAL: Load Character ====================
         updateLoadingUI('📦 Loading 3D character...', 'Preparing scene');
-        await loadCharacterModel(idleModelData.modelUrl + '?t=' + Date.now());
+
+        // Load the character model - ensure modelUrl exists
+        if (idleModelData.modelUrl) {
+            await loadCharacterModel(idleModelData.modelUrl + '?t=' + Date.now());
+        } else {
+            console.error('No model URL found in idle model data');
+            throw new Error('Failed to get 3D model URL');
+        }
 
         // Calculate and log total time
         const totalTime = ((Date.now() - startTime) / 1000).toFixed(1);
         console.log(`🎉 All assets loaded in ${totalTime}s! (Parallel pipeline)`);
 
-        // All done!
+        // All done! - Hide loading modal
+        console.log('[UI] Hiding loading modal...');
         loadingElement.classList.add('hidden');
+        loadingElement.style.display = 'none'; // Force hide with inline style as well
 
     } catch (error) {
         console.error('❌ Error in generation pipeline:', error);
@@ -775,8 +958,15 @@ const timeStep = 1 / 60; // Physics runs at 60 FPS
 // Movement constants
 const MOVE_SPEED = 12;  // Increased from 5 to 12 for faster movement
 const JUMP_FORCE = 8;
+const ROTATE_SPEED = 0.05; // Speed of character rotation (from unicorngame)
 const CAMERA_OFFSET = new THREE.Vector3(0, 3, 5); // Offset for third-person camera (back and up)
 const CAMERA_LERP_FACTOR = 0.1; // Smooth camera follow speed
+
+// Auto-swap pose tracking
+let lastPoseSwapTime = 0;
+const POSE_SWAP_INTERVAL = 500; // 0.5 seconds in milliseconds
+let isAutoSwapping = false;
+let lastMovementState = false;
 
 // Helper function to check if character is on ground
 function isGrounded() {
@@ -796,42 +986,90 @@ function animate() {
 
     // Handle character movement and controls (only in gameplay mode)
     if (characterModel && characterBody && gameplayMode) {
-        // Calculate movement direction based on camera orientation and input
+        // Check if any movement keys are pressed
+        const isMoving = keys.w || keys.s;  // Only W/S count as movement now
+        const isRotating = keys.a || keys.d;  // A/D are for rotation
+
+        // Handle automatic pose swapping
+        const currentTime = Date.now();
+
+        // Handle rotation with A/D keys (like unicorngame)
+        if (keys.a) {
+            // Rotate character left (counter-clockwise)
+            characterModel.rotation.y += ROTATE_SPEED;
+            if (characterBody) {
+                characterBody.quaternion.setFromEuler(0, characterModel.rotation.y, 0);
+            }
+        }
+        if (keys.d) {
+            // Rotate character right (clockwise)
+            characterModel.rotation.y -= ROTATE_SPEED;
+            if (characterBody) {
+                characterBody.quaternion.setFromEuler(0, characterModel.rotation.y, 0);
+            }
+        }
+
+        // Calculate movement direction based on character facing
         const moveDirection = new THREE.Vector3();
-        const isMoving = keys.w || keys.a || keys.s || keys.d;
 
         if (isMoving) {
-            // Get character's forward direction (where yellow arrow points)
-            const characterForward = new THREE.Vector3(0, 0, -1); // Forward in local space
-            characterForward.applyAxisAngle(new THREE.Vector3(0, 1, 0), characterModel.rotation.y);
-            characterForward.y = 0; // Project onto ground plane
+            // Check if we need to start auto-swapping
+            if (!isAutoSwapping && !lastMovementState) {
+                isAutoSwapping = true;
+                lastPoseSwapTime = currentTime;
+                // Immediately switch to walking pose when starting movement
+                if (currentPose === 'idle') {
+                    loadPoseModel('walking');
+                }
+            }
+
+            // Auto-swap poses every 0.5 seconds while moving
+            if (isAutoSwapping && (currentTime - lastPoseSwapTime) >= POSE_SWAP_INTERVAL) {
+                lastPoseSwapTime = currentTime;
+                // Toggle between idle and walking
+                const nextPose = currentPose === 'idle' ? 'walking' : 'idle';
+                loadPoseModel(nextPose);
+            }
+
+            // Get character's forward direction based on its rotation
+            const characterForward = new THREE.Vector3(
+                Math.sin(characterModel.rotation.y),
+                0,
+                Math.cos(characterModel.rotation.y)
+            );
             characterForward.normalize();
 
-            // Get character's right direction
-            const characterRight = new THREE.Vector3(1, 0, 0); // Right in local space
-            characterRight.applyAxisAngle(new THREE.Vector3(0, 1, 0), characterModel.rotation.y);
-            characterRight.y = 0; // Project onto ground plane
-            characterRight.normalize();
-
-            // Calculate movement direction based on WASD input (character-relative)
-            if (keys.w) moveDirection.sub(characterForward);  // Forward (opposite of arrow for third-person)
-            if (keys.s) moveDirection.add(characterForward);  // Backward
-            if (keys.a) moveDirection.add(characterRight);    // Left
-            if (keys.d) moveDirection.sub(characterRight);    // Right
-
-            moveDirection.normalize();
+            // W/S move forward/backward relative to character facing
+            if (keys.w) {
+                // Move forward in the direction character is facing
+                moveDirection.add(characterForward);
+            }
+            if (keys.s) {
+                // Move backward (opposite of facing direction)
+                moveDirection.sub(characterForward);
+            }
 
             // Apply movement velocity to physics body
             characterBody.velocity.x = moveDirection.x * MOVE_SPEED;
             characterBody.velocity.z = moveDirection.z * MOVE_SPEED;
 
-            // Character rotation is disabled - it maintains its initial facing direction
-            // This keeps the camera in a stable "Back" view
         } else {
             // No movement input - stop horizontal movement
             characterBody.velocity.x = 0;
             characterBody.velocity.z = 0;
+
+            // Stop auto-swapping and return to idle when movement stops
+            if (isAutoSwapping) {
+                isAutoSwapping = false;
+                // Return to idle pose when stopping
+                if (currentPose !== 'idle') {
+                    loadPoseModel('idle');
+                }
+            }
         }
+
+        // Update last movement state
+        lastMovementState = isMoving;
 
         // Handle jumping
         if (keys.space && isGrounded()) {
@@ -846,13 +1084,20 @@ function animate() {
         characterModel.position.y = characterBody.position.y + (characterModel.userData.halfHeight || 0);
         // Don't sync quaternion - we're handling rotation manually for Y axis
 
-        // Camera follows character using the saved camera offset from setup
-        // This maintains the exact camera angle you had when you pressed S
-        if (isMoving && window.cameraFollowOffset) {
-            // Use the saved offset from when S was pressed
+        // Camera follows character - update for rotation-based movement
+        if ((isMoving || isRotating) && characterModel) {
+            // Calculate camera position behind the character based on its rotation
+            // Note: negative Z is forward in Three.js, so camera behind means negative Z offset
+            const cameraOffset = new THREE.Vector3(0, 3, -8); // Behind and above
+
+            // Rotate the offset based on character's current rotation
+            const rotatedOffset = cameraOffset.clone();
+            rotatedOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), characterModel.rotation.y);
+
+            // Target camera position
             const targetCameraPos = new THREE.Vector3()
                 .copy(characterModel.position)
-                .add(window.cameraFollowOffset);
+                .add(rotatedOffset);
 
             // Smoothly interpolate camera position to follow character
             camera.position.lerp(targetCameraPos, CAMERA_LERP_FACTOR);
@@ -1007,8 +1252,8 @@ window.addEventListener('keyup', (event) => {
 });
 
 // Keyboard controls for debug/rotation
-let helpersVisible = true;
-let debugInfoVisible = true;
+let helpersVisible = false;  // Start with helpers hidden
+let debugInfoVisible = false;  // Start with debug info hidden
 
 window.addEventListener('keydown', (event) => {
     if (!event.key) return; // Guard against undefined key
@@ -1043,15 +1288,19 @@ window.addEventListener('keydown', (event) => {
             console.log('[SETUP] Orientation saved! Gameplay mode activated');
             console.log('[SETUP] Saved orientation:', savedOrientation);
 
-            // Calculate current camera offset relative to character
-            // This preserves the camera's current position when entering gameplay
-            const currentCameraOffset = new THREE.Vector3()
-                .copy(camera.position)
-                .sub(characterModel.position);
+            // Set camera behind character for third-person view
+            // Note: In Three.js, positive Z is towards the camera, so "behind" means positive Z
+            const cameraOffset = new THREE.Vector3(0, 3, -8); // Behind and above (negative Z is forward)
+            const rotatedOffset = cameraOffset.clone();
+            rotatedOffset.applyAxisAngle(new THREE.Vector3(0, 1, 0), characterModel.rotation.y);
 
-            // Store this offset for camera follow (we'll use this instead of hardcoded offset)
-            window.cameraFollowOffset = currentCameraOffset;
-            console.log('[SETUP] Camera offset saved:', currentCameraOffset);
+            // Position camera behind character
+            camera.position.copy(characterModel.position).add(rotatedOffset);
+
+            // Make camera look at character
+            controls.target.copy(characterModel.position);
+            controls.target.y += 1;
+            controls.update();
 
             // Update UI to show gameplay mode
             document.getElementById('game-mode').textContent = 'GAMEPLAY';
@@ -1116,11 +1365,11 @@ window.addEventListener('keydown', (event) => {
         console.log(`[DEBUG] All UI, helpers, and physics boxes ${debugInfoVisible ? 'shown' : 'hidden'}`);
     }
 
-    // Pose switching controls (number keys 1-2)
-    if (key === '1' && gameplayMode) {
+    // Pose switching controls (number keys 1-2) - disabled during auto-swapping
+    if (key === '1' && gameplayMode && !isAutoSwapping) {
         loadPoseModel('idle');
     }
-    if (key === '2' && gameplayMode) {
+    if (key === '2' && gameplayMode && !isAutoSwapping) {
         loadPoseModel('walking');
     }
     // SHOOTING POSE DISABLED
@@ -1143,6 +1392,7 @@ async function initializeApp() {
             console.log('[REUSE] All assets exist, skipping character selection');
             characterModal.classList.add('hidden');
             loadingElement.classList.remove('hidden');
+            loadingElement.style.display = ''; // Ensure it's visible
             generateAllAssets(userCharacter); // Use default character
         } else {
             // Show the character selection modal
@@ -1186,6 +1436,7 @@ characterSubmit.addEventListener('click', () => {
         // Hide modal, show loading
         characterModal.classList.add('hidden');
         loadingElement.classList.remove('hidden');
+        loadingElement.style.display = ''; // Ensure it's visible
 
         // Start generation with the selected character
         generateAllAssets(userCharacter);

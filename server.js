@@ -128,7 +128,7 @@ app.post('/api/generate-texture', async (req, res) => {
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: prompt || "Ultra high quality seamless tileable sci-fi ground texture, photorealistic metallic floor with intricate circuit patterns, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
+        prompt: prompt || "Ultra high quality seamless tileable ground texture, photorealistic floor for games, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -568,7 +568,7 @@ app.post('/api/generate-3d-model', async (req, res) => {
           slat_guidance_strength: 3,
           slat_sampling_steps: 12,
           mesh_simplify: 0.95,
-          texture_size: "1024",
+          texture_size: 1024,
           multiimage_algo: "stochastic"
         },
         logs: true,
@@ -623,10 +623,15 @@ app.post('/api/generate-3d-model', async (req, res) => {
 
   } catch (error) {
     console.error(`❌ Error generating 3D model with ${modelType}:`, error);
+    // Log detailed error for debugging
+    if (error.body && error.body.detail) {
+      console.error('Validation error details:', JSON.stringify(error.body.detail, null, 2));
+    }
     res.status(500).json({
       success: false,
       error: error.message,
-      modelType: modelType
+      modelType: modelType,
+      details: error.body?.detail || null
     });
   }
 });
