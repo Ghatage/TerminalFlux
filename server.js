@@ -1033,6 +1033,143 @@ app.post('/api/llm/query', async (req, res) => {
   }
 });
 
+// ==================== RIDDLE PUZZLE GENERATION API ====================
+
+// Generate riddle puzzle with 2 solution objects and 3 distractor objects
+app.post('/api/generate-riddle-puzzle', async (req, res) => {
+  try {
+    const { sessionId } = req.body;
+
+    console.log('[RIDDLE] Generating riddle puzzle...');
+    if (sessionId) console.log('[RIDDLE] For session:', sessionId);
+
+    // Check if riddle already exists in session metadata
+    if (sessionId) {
+      const session = await sessionService.getSession(sessionId);
+      if (session && session.metadata) {
+        try {
+          const metadata = JSON.parse(session.metadata);
+          if (metadata.riddle) {
+            console.log('[RIDDLE] Using cached riddle from session');
+            return res.json({
+              success: true,
+              cached: true,
+              ...metadata.riddle
+            });
+          }
+        } catch (e) {
+          // Metadata not parseable, continue with generation
+        }
+      }
+    }
+
+    // Generate new riddle using Anthropic API
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': process.env.ANTHROPIC_API_KEY,
+        'anthropic-version': '2023-06-01',
+        'anthropic-beta': 'structured-outputs-2025-11-13'
+      },
+      body: JSON.stringify({
+        model: 'claude-sonnet-4-5-20250929',
+        max_tokens: 2048,
+        messages: [
+          {
+            role: 'user',
+            content: 'Generate a riddle or puzzle that involves exactly 2 objects. The puzzle should describe an objective that can only be achieved by using these 2 objects together. The objects can be related or unrelated, but together they must make logical sense for solving the puzzle.\n\nFor each object description, write it as a detailed visual prompt suitable for an image-to-3D model generation pipeline. Be specific about appearance, materials, and key visual features.\n\nAlso generate 3 additional random object descriptions (as distractors) that are NOT the solution to the puzzle. These should also be formatted as prompts for image-to-3D generation.'
+          }
+        ],
+        output_format: {
+          type: 'json_schema',
+          schema: {
+            type: 'object',
+            properties: {
+              riddle: {
+                type: 'string',
+                description: 'The riddle or puzzle text describing the objective'
+              },
+              object1_description: {
+                type: 'string',
+                description: 'Visual description of the first solution object for image-to-3D pipeline'
+              },
+              object2_description: {
+                type: 'string',
+                description: 'Visual description of the second solution object for image-to-3D pipeline'
+              },
+              random_object1_description: {
+                type: 'string',
+                description: 'Visual description of first random distractor object for image-to-3D pipeline'
+              },
+              random_object2_description: {
+                type: 'string',
+                description: 'Visual description of second random distractor object for image-to-3D pipeline'
+              },
+              random_object3_description: {
+                type: 'string',
+                description: 'Visual description of third random distractor object for image-to-3D pipeline'
+              }
+            },
+            required: [
+              'riddle',
+              'object1_description',
+              'object2_description',
+              'random_object1_description',
+              'random_object2_description',
+              'random_object3_description'
+            ],
+            additionalProperties: false
+          }
+        }
+      })
+    });
+
+    if (!response.ok) {
+      const errorData = await response.text();
+      throw new Error(`Anthropic API error: ${response.status} ${errorData}`);
+    }
+
+    const responseData = await response.json();
+    console.log('[RIDDLE] Riddle generated successfully');
+
+    // Parse the JSON response from content
+    const content = responseData.content[0].text;
+    const riddleData = JSON.parse(content);
+
+    // Store riddle in session metadata
+    if (sessionId) {
+      const session = await sessionService.getSession(sessionId);
+      let metadata = {};
+      try {
+        if (session && session.metadata) {
+          metadata = JSON.parse(session.metadata);
+        }
+      } catch (e) {
+        metadata = {};
+      }
+
+      metadata.riddle = riddleData;
+      await sessionService.updateSession(sessionId, { metadata });
+      console.log('[RIDDLE] Stored riddle in session metadata');
+    }
+
+    res.json({
+      success: true,
+      cached: false,
+      requestId: responseData.id,
+      ...riddleData
+    });
+
+  } catch (error) {
+    console.error('[RIDDLE] Error generating riddle puzzle:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 // ==================== MEME GENERATION API ====================
 
 // Generate meme poster

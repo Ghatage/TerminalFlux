@@ -13,7 +13,8 @@ world.defaultContactMaterial.contactEquationStiffness = 1e8;
 world.defaultContactMaterial.contactEquationRelaxation = 3;
 
 // Wall configuration
-const GROUND_SIZE = 20;
+const GROUND_SIZE = 20; // Gameplay boundaries
+const VISUAL_GROUND_SIZE = 100; // Visual ground radius (extends to horizon)
 const WALL_HEIGHT = 4;
 const WALL_THICKNESS = 0.5;
 
@@ -184,6 +185,16 @@ let environmentalObjects = []; // Store {mesh, body} pairs for physics sync
 let environmentalMeshes = [];
 let environmentalBodies = [];
 
+// Altar and Nemotron model
+let altarMesh;
+let altarBody;
+let nemotronModel;
+let nemotronBody;
+
+// Riddle puzzle system
+let riddleText = null;
+let puzzleObjects = []; // Store {mesh, body, type: 'solution'|'distractor', description, objectIndex}
+
 // Function to update loading UI
 function updateLoadingUI(message, submessage = '', showSpinner = true) {
     // Update only the text content, not the structure
@@ -251,6 +262,39 @@ function showFullSizeImage(imageUrl, label) {
     modal.classList.remove('hidden');
 }
 
+// Function to show/hide interaction prompt
+function showInteractionPrompt(show) {
+    const prompt = document.getElementById('interaction-prompt');
+    if (show) {
+        prompt.classList.remove('hidden');
+    } else {
+        prompt.classList.add('hidden');
+    }
+}
+
+// Function to show Nemotron dialogue
+function showNemotronDialogue() {
+    const modal = document.getElementById('nemotron-modal');
+    const messageElement = document.getElementById('nemotron-message');
+
+    // Display riddle if available, otherwise show default message
+    if (riddleText) {
+        messageElement.textContent = riddleText;
+    } else {
+        messageElement.textContent = 'Welcome, traveler. You have found the sacred altar. What knowledge do you seek?';
+    }
+
+    modal.classList.remove('hidden');
+    console.log('[INTERACTION] Nemotron dialogue shown');
+}
+
+// Function to hide Nemotron dialogue
+function hideNemotronDialogue() {
+    const modal = document.getElementById('nemotron-modal');
+    modal.classList.add('hidden');
+    console.log('[INTERACTION] Nemotron dialogue hidden');
+}
+
 // Set up image viewer modal close handlers
 document.addEventListener('DOMContentLoaded', () => {
     const imageViewerModal = document.getElementById('image-viewer-modal');
@@ -280,6 +324,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Add close handler for Nemotron modal
+    const nemotronModal = document.getElementById('nemotron-modal');
+    const nemotronCloseBtn = document.getElementById('nemotron-close');
+    if (nemotronCloseBtn) {
+        nemotronCloseBtn.addEventListener('click', () => {
+            hideNemotronDialogue();
+        });
+    }
+
     // Close on ESC key
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
@@ -291,6 +344,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log('[UI] Closing loading modal via ESC key');
                 loadingModal.classList.add('hidden');
                 loadingModal.style.display = 'none';
+            }
+            // Also allow ESC to close Nemotron modal
+            if (nemotronModal && !nemotronModal.classList.contains('hidden')) {
+                hideNemotronDialogue();
             }
         }
     });
@@ -308,11 +365,11 @@ function createGround(texture) {
     // Configure texture for tiling
     texture.wrapS = THREE.RepeatWrapping;
     texture.wrapT = THREE.RepeatWrapping;
-    texture.repeat.set(40, 40); // Tile the texture 40x40 times
+    texture.repeat.set(100, 100); // Tile the texture 100x100 times for larger ground
     texture.colorSpace = THREE.SRGBColorSpace;
 
-    // Create ground geometry
-    const groundGeometry = new THREE.PlaneGeometry(20, 20, 100, 100);
+    // Create circular ground geometry (extends to horizon)
+    const groundGeometry = new THREE.CircleGeometry(VISUAL_GROUND_SIZE, 64); // 64 segments for smooth circle
 
     // Create material with the texture
     const groundMeshMaterial = new THREE.MeshStandardMaterial({
@@ -416,6 +473,409 @@ function createBoundaryWalls() {
     });
 
     console.log('[OK] South Wall created with physics!');
+}
+
+// Create altar with physics (circular pedestal for Nemotron model)
+function createAltar() {
+    console.log('[ALTAR] Creating altar...');
+
+    // Altar configuration
+    const ALTAR_RADIUS = 1.5; // Radius of circular pedestal
+    const ALTAR_HEIGHT = 0.75; // Height (0.5-1 unit, requires small jump)
+    const ALTAR_POSITION = {
+        x: 0, // Centered
+        y: ALTAR_HEIGHT / 2, // Half height so base is at ground level
+        z: -6.5 // 6.5 units from south wall (far enough to see meme posters)
+    };
+
+    // Create circular pedestal mesh
+    const altarGeometry = new THREE.CylinderGeometry(
+        ALTAR_RADIUS, // Top radius
+        ALTAR_RADIUS, // Bottom radius
+        ALTAR_HEIGHT, // Height
+        32 // Segments for smooth circle
+    );
+
+    const altarMaterial = new THREE.MeshStandardMaterial({
+        color: 0x8B7355, // Stone/brown color
+        roughness: 0.8,
+        metalness: 0.2
+    });
+
+    altarMesh = new THREE.Mesh(altarGeometry, altarMaterial);
+    altarMesh.position.set(ALTAR_POSITION.x, ALTAR_POSITION.y, ALTAR_POSITION.z);
+    altarMesh.castShadow = true;
+    altarMesh.receiveShadow = true;
+    scene.add(altarMesh);
+
+    // Create physics body for altar (static cylinder)
+    const altarShape = new CANNON.Cylinder(
+        ALTAR_RADIUS, // Top radius
+        ALTAR_RADIUS, // Bottom radius
+        ALTAR_HEIGHT, // Height
+        16 // Segments
+    );
+
+    altarBody = new CANNON.Body({
+        mass: 0, // Static (immovable)
+        shape: altarShape,
+        material: groundMaterial
+    });
+
+    altarBody.position.set(ALTAR_POSITION.x, ALTAR_POSITION.y, ALTAR_POSITION.z);
+    world.addBody(altarBody);
+
+    console.log(`[OK] Altar created at (${ALTAR_POSITION.x}, ${ALTAR_POSITION.y}, ${ALTAR_POSITION.z})`);
+}
+
+// Load Nemotron model and place it on the altar
+async function loadNemotronModel() {
+    console.log('[NEMOTRON] Loading Nemotron model...');
+
+    const ALTAR_HEIGHT = 0.75; // Match altar height
+    const ALTAR_Z = -6.5; // Match altar Z position
+
+    return new Promise((resolve, reject) => {
+        gltfLoader.load(
+            '/assets/models/nemotron.glb',
+            (gltf) => {
+                nemotronModel = gltf.scene;
+
+                // Calculate bounding box for scaling
+                const box = new THREE.Box3().setFromObject(nemotronModel);
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                // Scale to be smaller than character (approximately 0.6 units tall)
+                const targetSize = 0.6;
+                const scale = targetSize / maxDim;
+                nemotronModel.scale.set(scale, scale, scale);
+
+                // Recalculate bounding box after scaling
+                box.setFromObject(nemotronModel);
+                const scaledSize = box.getSize(new THREE.Vector3());
+
+                // Position on top of altar
+                const nemotronY = ALTAR_HEIGHT + (scaledSize.y / 2);
+                nemotronModel.position.set(0, nemotronY, ALTAR_Z);
+
+                // Enable shadows and proper materials
+                nemotronModel.traverse((child) => {
+                    if (child.isMesh) {
+                        child.castShadow = true;
+                        child.receiveShadow = true;
+
+                        if (child.material) {
+                            if (child.material.map) {
+                                child.material.map.colorSpace = THREE.SRGBColorSpace;
+                            }
+                            child.material.needsUpdate = true;
+                        }
+                    }
+                });
+
+                scene.add(nemotronModel);
+
+                // Create physics body (static box collider)
+                const halfExtents = new CANNON.Vec3(
+                    scaledSize.x / 2,
+                    scaledSize.y / 2,
+                    scaledSize.z / 2
+                );
+
+                const nemotronShape = new CANNON.Box(halfExtents);
+
+                nemotronBody = new CANNON.Body({
+                    mass: 0, // Static (immovable)
+                    shape: nemotronShape,
+                    material: groundMaterial
+                });
+
+                nemotronBody.position.set(0, nemotronY, ALTAR_Z);
+                world.addBody(nemotronBody);
+
+                console.log(`[OK] Nemotron model loaded and placed at (0, ${nemotronY.toFixed(2)}, ${ALTAR_Z})`);
+                resolve(nemotronModel);
+            },
+            (progress) => {
+                console.log('[NEMOTRON] Loading progress:', (progress.loaded / progress.total * 100).toFixed(1) + '%');
+            },
+            (error) => {
+                console.error('[NEMOTRON] Error loading Nemotron model:', error);
+                reject(error);
+            }
+        );
+    });
+}
+
+// Generate riddle puzzle with Claude
+async function generateRiddlePuzzle(sessionId) {
+    console.log('[RIDDLE] Generating riddle puzzle...');
+
+    try {
+        const response = await fetch('http://localhost:8081/api/generate-riddle-puzzle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ sessionId: sessionId })
+        });
+
+        const data = await response.json();
+
+        if (!data.success) {
+            throw new Error('Riddle generation failed: ' + data.error);
+        }
+
+        console.log(`[RIDDLE] Generated riddle ${data.cached ? '(cached)' : '(new)'}:`, data.riddle);
+
+        // Store riddle text globally
+        riddleText = data.riddle;
+
+        // Return object descriptions in order: [solution1, solution2, distractor1, distractor2, distractor3]
+        return {
+            success: true,
+            riddle: data.riddle,
+            objectDescriptions: [
+                { description: data.object1_description, type: 'solution', index: 0 },
+                { description: data.object2_description, type: 'solution', index: 1 },
+                { description: data.random_object1_description, type: 'distractor', index: 2 },
+                { description: data.random_object2_description, type: 'distractor', index: 3 },
+                { description: data.random_object3_description, type: 'distractor', index: 4 }
+            ],
+            cached: data.cached
+        };
+
+    } catch (error) {
+        console.error('[RIDDLE] Error generating riddle:', error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Generate a single puzzle object (following createEnv pattern exactly)
+async function generatePuzzleObject(objectDesc, objectType, objectIndex, sessionId) {
+    console.log(`[PUZZLE] Generating puzzle object ${objectIndex} (${objectType})...`);
+
+    try {
+        // Step 1: Generate image with white background
+        const imagePrompt = `Ultra high quality 3D object, ${objectDesc.description}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
+
+        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pose: `puzzle_object_${objectIndex}`, // Unique pose identifier
+                character: imagePrompt,
+                sessionId: sessionId
+            })
+        });
+        const imageData = await imageResponse.json();
+
+        if (!imageData.success) {
+            throw new Error('Image generation failed: ' + imageData.error);
+        }
+
+        console.log(`[PUZZLE] Object ${objectIndex} image generated:`, imageData.imageUrl);
+        addImageToGallery(imageData.remoteUrl || imageData.imageUrl, `Puzzle Object ${objectIndex + 1}`);
+
+        // CRITICAL: Ensure we have remote URL for Trellis
+        if (!imageData.remoteUrl) {
+            throw new Error('No remote URL returned from image generation - Trellis requires remote URLs');
+        }
+
+        // Step 2: Generate 3D model with Trellis (single image) - use REMOTE URL only
+        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrls: [imageData.remoteUrl], // Always use remote URL for Trellis
+                pose: `puzzle_object_${objectIndex}`,
+                modelType: userModelType, // Use same model type as character
+                sessionId: sessionId
+            })
+        });
+        const modelData = await modelResponse.json();
+
+        if (!modelData.success) {
+            throw new Error('3D model generation failed: ' + modelData.error);
+        }
+
+        console.log(`[PUZZLE] Object ${objectIndex} 3D model generated:`, modelData.modelUrl);
+
+        return {
+            success: true,
+            modelUrl: modelData.modelUrl,
+            description: objectDesc.description,
+            type: objectType,
+            objectIndex: objectIndex
+        };
+
+    } catch (error) {
+        console.error(`[PUZZLE] Error generating puzzle object ${objectIndex}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
+// Place puzzle objects in scene with smart collision detection
+async function placePuzzleObjects(objectModels, existingObjects) {
+    console.log(`[PUZZLE] Placing ${objectModels.length} puzzle objects...`);
+
+    const placementRadius = 15; // Closer than trees (18) but not too far
+    const MIN_DISTANCE = 3; // Same as environmental objects
+    const SOUTH_WALL_EXCLUSION_Z = -8; // Keep clear of south wall
+
+    for (let i = 0; i < objectModels.length; i++) {
+        const objData = objectModels[i];
+
+        try {
+            const gltf = await new Promise((resolve, reject) => {
+                gltfLoader.load(
+                    objData.modelUrl + '?t=' + Date.now() + '&puzzle=' + i,
+                    resolve,
+                    undefined,
+                    reject
+                );
+            });
+
+            const mesh = gltf.scene;
+
+            // Calculate bounding box for scaling
+            const box = new THREE.Box3().setFromObject(mesh);
+            const size = box.getSize(new THREE.Vector3());
+            const maxDim = Math.max(size.x, size.y, size.z);
+
+            // Scale to small size (0.5-1 unit) - collectible item size
+            const targetSize = 0.5 + Math.random() * 0.5; // Random between 0.5-1
+            const scale = targetSize / maxDim;
+            mesh.scale.set(scale, scale, scale);
+
+            // Recalculate size after scaling
+            box.setFromObject(mesh);
+            const scaledSize = box.getSize(new THREE.Vector3());
+
+            // Find valid position with collision detection
+            let x, z, attempts = 0;
+            const maxAttempts = 100;
+
+            do {
+                // Generate random polar coordinates for circular distribution
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.sqrt(Math.random()) * placementRadius;
+
+                x = Math.cos(angle) * radius;
+                z = Math.sin(angle) * radius;
+
+                // Check if position is valid
+                let validPosition = z > SOUTH_WALL_EXCLUSION_Z; // Not in front of south wall
+
+                // Check minimum distance to environmental objects (trees, props)
+                if (validPosition) {
+                    for (const obj of existingObjects) {
+                        if (obj && obj.mesh) {
+                            const dx = x - obj.mesh.position.x;
+                            const dz = z - obj.mesh.position.z;
+                            const distance = Math.sqrt(dx * dx + dz * dz);
+                            if (distance < MIN_DISTANCE) {
+                                validPosition = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                // Check minimum distance to altar
+                if (validPosition && altarMesh) {
+                    const dx = x - altarMesh.position.x;
+                    const dz = z - altarMesh.position.z;
+                    const distance = Math.sqrt(dx * dx + dz * dz);
+                    if (distance < MIN_DISTANCE) {
+                        validPosition = false;
+                    }
+                }
+
+                // Check minimum distance to previously placed puzzle objects
+                if (validPosition && i > 0) {
+                    for (let j = 0; j < i; j++) {
+                        const otherObj = puzzleObjects[j];
+                        if (otherObj && otherObj.mesh) {
+                            const dx = x - otherObj.mesh.position.x;
+                            const dz = z - otherObj.mesh.position.z;
+                            const distance = Math.sqrt(dx * dx + dz * dz);
+                            if (distance < MIN_DISTANCE) {
+                                validPosition = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (validPosition) break;
+                attempts++;
+            } while (attempts < maxAttempts);
+
+            if (attempts >= maxAttempts) {
+                console.warn(`[PUZZLE] Could not find valid position for object ${i} after ${maxAttempts} attempts, using last attempt`);
+            }
+
+            const y = scaledSize.y / 2; // Place at ground level
+            mesh.position.set(x, y, z);
+
+            // Random rotation around Y axis for variety
+            mesh.rotation.y = Math.random() * Math.PI * 2;
+
+            // Enable shadows
+            mesh.traverse((child) => {
+                if (child.isMesh) {
+                    child.castShadow = true;
+                    child.receiveShadow = true;
+
+                    if (child.material) {
+                        if (child.material.map) {
+                            child.material.map.colorSpace = THREE.SRGBColorSpace;
+                        }
+                        child.material.needsUpdate = true;
+                    }
+                }
+            });
+
+            scene.add(mesh);
+
+            // Create static physics body (mass = 0 for now, can be made dynamic later for inventory)
+            const halfExtents = new CANNON.Vec3(
+                scaledSize.x / 2,
+                scaledSize.y / 2,
+                scaledSize.z / 2
+            );
+            const objectShape = new CANNON.Box(halfExtents);
+
+            const objectBody = new CANNON.Body({
+                mass: 0, // Static object (doesn't move) - prepare for future interaction
+                shape: objectShape,
+                material: groundMaterial
+            });
+
+            objectBody.position.set(x, y, z);
+            objectBody.quaternion.copy(mesh.quaternion);
+
+            world.addBody(objectBody);
+
+            // Store with full metadata for future interaction
+            puzzleObjects.push({
+                mesh: mesh,
+                body: objectBody,
+                isPuzzleObject: true,
+                puzzleType: objData.type, // 'solution' or 'distractor'
+                objectIndex: objData.objectIndex,
+                description: objData.description,
+                preparingForInteraction: true // Flag for future inventory system
+            });
+
+            console.log(`[PUZZLE] Placed ${objData.type} object ${i + 1}/${objectModels.length} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
+
+        } catch (error) {
+            console.error(`[PUZZLE] Error placing puzzle object ${i}:`, error);
+        }
+    }
+
+    console.log(`[PUZZLE] Finished placing ${puzzleObjects.length} puzzle objects`);
 }
 
 // Create a single meme poster on wall
@@ -525,6 +985,101 @@ async function createMemePosters(sessionId) {
     );
 
     console.log('[OK] All meme posters created!');
+}
+
+// Load and place meme posters with random positions (for session reload)
+async function loadAndPlaceMemes(sessionId) {
+    console.log('[MEMES] Loading meme posters from session with random positions...');
+
+    try {
+        // Query database for meme poster assets
+        const response = await fetch(`http://localhost:8081/api/sessions/${sessionId}/assets`);
+        const data = await response.json();
+
+        if (!data.success || !data.assets) {
+            console.log('[MEMES] No assets found for session');
+            return;
+        }
+
+        // Filter for meme poster images
+        const memeAssets = data.assets.filter(asset =>
+            asset.asset_type === 'images' &&
+            asset.file_path.includes('meme') &&
+            asset.file_path.endsWith('.png')
+        );
+
+        console.log(`[MEMES] Found ${memeAssets.length} meme posters to reload`);
+
+        if (memeAssets.length === 0) {
+            console.log('[MEMES] No meme posters found in session');
+            return;
+        }
+
+        // Generate random positions for posters on South Wall
+        const wallWidth = 18; // Usable width for posters (with margins)
+        const wallHeight = 4; // Wall height
+        const posterSpacing = wallWidth / memeAssets.length; // Evenly space posters
+
+        for (let i = 0; i < memeAssets.length; i++) {
+            const asset = memeAssets[i];
+
+            // Extract filename from file path
+            const filename = asset.file_path.split('/').pop();
+            const posterUrl = `/assets/${sessionId}/images/${filename}`;
+
+            // Generate random position on South Wall
+            // X position: spread across wall with some randomness
+            const baseX = (i * posterSpacing) - (wallWidth / 2) + (posterSpacing / 2);
+            const randomOffsetX = (Math.random() - 0.5) * (posterSpacing * 0.5); // Random offset within spacing
+            const x = baseX + randomOffsetX;
+
+            // Y position: random height between 1.5 and 3.0
+            const y = 1.5 + Math.random() * 1.5;
+
+            // Z position: South Wall (fixed)
+            const z = -9.74;
+
+            // Load texture
+            const posterTexture = await new Promise((resolve, reject) => {
+                textureLoader.load(
+                    posterUrl + '?t=' + Date.now(),
+                    resolve,
+                    undefined,
+                    reject
+                );
+            });
+
+            // Configure texture
+            posterTexture.colorSpace = THREE.SRGBColorSpace;
+            posterTexture.wrapS = THREE.ClampToEdgeWrapping;
+            posterTexture.wrapT = THREE.ClampToEdgeWrapping;
+
+            // Create poster geometry (3x3 units)
+            const posterGeometry = new THREE.PlaneGeometry(3, 3);
+
+            // Create poster material
+            const posterMaterial = new THREE.MeshStandardMaterial({
+                map: posterTexture,
+                roughness: 0.8,
+                metalness: 0.1,
+                side: THREE.FrontSide
+            });
+
+            // Create mesh
+            const posterMesh = new THREE.Mesh(posterGeometry, posterMaterial);
+            posterMesh.position.set(x, y, z);
+            posterMesh.rotation.y = 0; // Face forward
+
+            scene.add(posterMesh);
+
+            console.log(`[MEMES] Loaded poster ${i + 1}/${memeAssets.length} at (${x.toFixed(1)}, ${y.toFixed(1)}, ${z})`);
+        }
+
+        console.log('[OK] All meme posters reloaded with random positions!');
+
+    } catch (error) {
+        console.error('[MEMES] Error loading meme posters:', error);
+    }
 }
 
 // Create environmental objects (LLM → Image → Trellis pipeline)
@@ -648,12 +1203,47 @@ async function placeEnvironmentalObjects(modelUrl, count, objectType, descriptio
             box.setFromObject(mesh);
             const scaledSize = box.getSize(new THREE.Vector3());
 
-            // Random position on ground (with margin from edges)
-            const margin = 3;
-            const x = (Math.random() * (GROUND_SIZE - margin * 2)) - (GROUND_SIZE / 2 - margin);
-            const z = (Math.random() * (GROUND_SIZE - margin * 2)) - (GROUND_SIZE / 2 - margin);
-            const y = scaledSize.y / 2; // Place at ground level
+            // Random position on ground with improved dispersion
+            // Use polar coordinates for circular distribution across larger ground
+            let x, z, attempts = 0;
+            const maxAttempts = 50;
+            const MIN_DISTANCE = 3; // Minimum 3 units apart
+            const SOUTH_WALL_EXCLUSION_Z = -8; // Keep area in front of south wall clear
+            const placementRadius = 18; // Place within 18 unit radius
 
+            // Try to find a valid position (not too close to other objects, not in front of wall)
+            do {
+                // Generate random polar coordinates for circular distribution
+                const angle = Math.random() * Math.PI * 2;
+                const radius = Math.sqrt(Math.random()) * placementRadius; // sqrt for uniform distribution
+
+                x = Math.cos(angle) * radius;
+                z = Math.sin(angle) * radius;
+
+                // Check if position is valid
+                let validPosition = z > SOUTH_WALL_EXCLUSION_Z; // Not in front of south wall
+
+                // Check minimum distance to previously placed objects in this batch
+                if (validPosition && i > 0) {
+                    for (let j = 0; j < i; j++) {
+                        const otherObj = environmentalObjects[environmentalObjects.length - i + j];
+                        if (otherObj && otherObj.mesh) {
+                            const dx = x - otherObj.mesh.position.x;
+                            const dz = z - otherObj.mesh.position.z;
+                            const distance = Math.sqrt(dx * dx + dz * dz);
+                            if (distance < MIN_DISTANCE) {
+                                validPosition = false;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (validPosition) break;
+                attempts++;
+            } while (attempts < maxAttempts);
+
+            const y = scaledSize.y / 2; // Place at ground level
             mesh.position.set(x, y, z);
 
             // Random rotation around Y axis for variety
@@ -1096,6 +1686,13 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
 
         const idleImageUrl = idleBaseData.remoteUrl || idleBaseData.imageUrl;
 
+        // ==================== RIDDLE PUZZLE: Start generation in background ====================
+        updateLoadingUI('🧩 Starting riddle puzzle generation...', 'Claude is creating a puzzle');
+        console.log('🧩 RIDDLE: Starting riddle puzzle generation...');
+
+        // Generate riddle and get object descriptions (parallel with everything else)
+        const riddleGenerationPromise = generateRiddlePuzzle(currentSessionId);
+
         // ==================== ENV OBJECTS: Start generation in background ====================
         updateLoadingUI('🌲 Starting environmental generation...', 'Creating thematic props and trees');
         console.log('🌲 ENV: Starting environmental objects and trees generation...');
@@ -1240,6 +1837,44 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         }
 
         console.log('🎉 Environmental objects complete!');
+
+        // ==================== CREATE ALTAR & NEMOTRON ====================
+        updateLoadingUI('🏛️ Creating altar and Nemotron...', 'Setting up interactive elements');
+        console.log('🏛️ Creating altar and Nemotron model...');
+        createAltar();
+        await loadNemotronModel();
+        console.log('✅ Altar and Nemotron ready!');
+
+        // ==================== RIDDLE PUZZLE OBJECTS: Wait for riddle and generate 5 objects in parallel ====================
+        updateLoadingUI('🧩 Generating puzzle objects...', 'Creating 5 3D puzzle items in parallel');
+        console.log('🧩 RIDDLE: Waiting for riddle generation and creating puzzle objects...');
+
+        const riddleData = await riddleGenerationPromise;
+        if (riddleData.success) {
+            console.log('✅ Riddle ready:', riddleData.riddle);
+
+            // Generate all 5 puzzle objects in parallel for maximum speed
+            const puzzleObjectPromises = riddleData.objectDescriptions.map(objDesc =>
+                generatePuzzleObject(objDesc, objDesc.type, objDesc.index, currentSessionId)
+            );
+
+            const puzzleObjectResults = await Promise.all(puzzleObjectPromises);
+
+            // Filter successful results
+            const successfulPuzzleObjects = puzzleObjectResults.filter(result => result.success);
+
+            if (successfulPuzzleObjects.length > 0) {
+                console.log(`✅ Generated ${successfulPuzzleObjects.length}/5 puzzle objects`);
+
+                // Place puzzle objects with smart collision detection
+                await placePuzzleObjects(successfulPuzzleObjects, environmentalObjects);
+                console.log('✅ Puzzle objects placed in scene!');
+            } else {
+                console.warn('⚠️ No puzzle objects were successfully generated');
+            }
+        } else {
+            console.warn('⚠️ Riddle generation failed:', riddleData.error);
+        }
 
         // ==================== PHASE 4: All Views + 3D Models (12 Parallel) ====================
         updateLoadingUI('💥 Phase 4: Final parallel generation...', 'All remaining views and 3D models');
@@ -1620,6 +2255,18 @@ function animate() {
     purpleLight.position.x = Math.cos(time * 0.7) * 5;
     purpleLight.position.z = Math.sin(time * 0.7) * 5;
 
+    // Check proximity to Nemotron for interaction prompt
+    if (characterModel && nemotronModel && gameplayMode) {
+        const distance = characterModel.position.distanceTo(nemotronModel.position);
+        const INTERACTION_DISTANCE = 4; // 4 units (medium distance as specified)
+
+        if (distance <= INTERACTION_DISTANCE) {
+            showInteractionPrompt(true);
+        } else {
+            showInteractionPrompt(false);
+        }
+    }
+
     // Update controls
     controls.update();
 
@@ -1863,6 +2510,19 @@ window.addEventListener('keydown', (event) => {
     // if (key === '3' && gameplayMode) {
     //     loadPoseModel('shooting');
     // }
+
+    // F - Interact with Nemotron (when in proximity and in gameplay mode)
+    if (key === 'f' && gameplayMode && characterModel && nemotronModel) {
+        const distance = characterModel.position.distanceTo(nemotronModel.position);
+        const INTERACTION_DISTANCE = 4;
+
+        if (distance <= INTERACTION_DISTANCE) {
+            console.log('[INTERACTION] F key pressed - showing Nemotron dialogue');
+            showNemotronDialogue();
+        } else {
+            console.log('[INTERACTION] F key pressed but too far from Nemotron');
+        }
+    }
 });
 
 // Session management functions
@@ -1975,6 +2635,219 @@ async function checkAndLoadSessionAssets(sessionId) {
         // Load the idle model directly
         await loadCharacterModel(modelPath + '?t=' + Date.now());
         console.log('[SESSION] Loaded character model from disk');
+
+        // Load meme posters with random positions
+        await loadAndPlaceMemes(sessionId);
+
+        // Check for and load tree model
+        const treeModel = data.assets.find(a =>
+            a.asset_type === 'models' &&
+            a.pose === 'tree' &&
+            a.file_path.includes('character_tree.glb')
+        );
+        if (treeModel) {
+            const treeModelUrl = `/assets/${sessionId}/models/character_tree.glb`;
+            console.log('[SESSION] Found tree model, loading with random positions...');
+            await placeEnvironmentalObjects(treeModelUrl, 5, 'tree', null);
+        } else {
+            console.log('[SESSION] No tree model found in session');
+        }
+
+        // Check for and load environmental object model
+        const objectModel = data.assets.find(a =>
+            a.asset_type === 'models' &&
+            a.pose === 'object' &&
+            a.file_path.includes('character_object.glb')
+        );
+        if (objectModel) {
+            const objectModelUrl = `/assets/${sessionId}/models/character_object.glb`;
+            console.log('[SESSION] Found environmental object model, loading with random positions...');
+            await placeEnvironmentalObjects(objectModelUrl, 5, 'object', null);
+        } else {
+            console.log('[SESSION] No environmental object model found in session');
+        }
+
+        // Create altar and load Nemotron model
+        createAltar();
+        await loadNemotronModel();
+
+        // Load riddle puzzle if it exists in session metadata
+        console.log('[SESSION] Checking for riddle puzzle...');
+        const session = await fetch(`http://localhost:8081/api/sessions/${sessionId}`).then(r => r.json());
+        if (session.success && session.session && session.session.metadata) {
+            try {
+                const metadata = JSON.parse(session.session.metadata);
+                if (metadata.riddle) {
+                    riddleText = metadata.riddle.riddle;
+                    console.log('[SESSION] Loaded riddle from session:', riddleText);
+
+                    // Check for puzzle object GLB files
+                    const puzzleObjectPaths = [];
+                    for (let i = 0; i < 5; i++) {
+                        const modelPath = `/assets/${sessionId}/models/character_puzzle_object_${i}.glb`;
+                        const checkResponse = await fetch(`http://localhost:8081${modelPath}`, { method: 'HEAD' });
+                        if (checkResponse.ok) {
+                            puzzleObjectPaths.push(modelPath);
+                        }
+                    }
+
+                    if (puzzleObjectPaths.length > 0) {
+                        console.log(`[SESSION] Found ${puzzleObjectPaths.length} puzzle objects, loading...`);
+
+                        // Load and place puzzle objects
+                        for (let i = 0; i < puzzleObjectPaths.length; i++) {
+                            try {
+                                const gltf = await new Promise((resolve, reject) => {
+                                    gltfLoader.load(
+                                        puzzleObjectPaths[i] + '?t=' + Date.now(),
+                                        resolve,
+                                        undefined,
+                                        reject
+                                    );
+                                });
+
+                                const mesh = gltf.scene;
+
+                                // Calculate bounding box for scaling
+                                const box = new THREE.Box3().setFromObject(mesh);
+                                const size = box.getSize(new THREE.Vector3());
+                                const maxDim = Math.max(size.x, size.y, size.z);
+
+                                // Scale to small size (0.5-1 unit)
+                                const targetSize = 0.5 + Math.random() * 0.5;
+                                const scale = targetSize / maxDim;
+                                mesh.scale.set(scale, scale, scale);
+
+                                // Recalculate size after scaling
+                                box.setFromObject(mesh);
+                                const scaledSize = box.getSize(new THREE.Vector3());
+
+                                // Random placement (same algorithm as fresh generation)
+                                const placementRadius = 15;
+                                const MIN_DISTANCE = 3;
+                                const SOUTH_WALL_EXCLUSION_Z = -8;
+
+                                let x, z, attempts = 0;
+                                const maxAttempts = 100;
+
+                                do {
+                                    const angle = Math.random() * Math.PI * 2;
+                                    const radius = Math.sqrt(Math.random()) * placementRadius;
+                                    x = Math.cos(angle) * radius;
+                                    z = Math.sin(angle) * radius;
+
+                                    let validPosition = z > SOUTH_WALL_EXCLUSION_Z;
+
+                                    // Check distance from environmental objects
+                                    if (validPosition && environmentalObjects.length > 0) {
+                                        for (const obj of environmentalObjects) {
+                                            if (obj && obj.mesh) {
+                                                const dx = x - obj.mesh.position.x;
+                                                const dz = z - obj.mesh.position.z;
+                                                const distance = Math.sqrt(dx * dx + dz * dz);
+                                                if (distance < MIN_DISTANCE) {
+                                                    validPosition = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    // Check distance from altar
+                                    if (validPosition && altarMesh) {
+                                        const dx = x - altarMesh.position.x;
+                                        const dz = z - altarMesh.position.z;
+                                        const distance = Math.sqrt(dx * dx + dz * dz);
+                                        if (distance < MIN_DISTANCE) {
+                                            validPosition = false;
+                                        }
+                                    }
+
+                                    // Check distance from previously placed puzzle objects
+                                    if (validPosition && i > 0) {
+                                        for (let j = 0; j < i; j++) {
+                                            const otherObj = puzzleObjects[j];
+                                            if (otherObj && otherObj.mesh) {
+                                                const dx = x - otherObj.mesh.position.x;
+                                                const dz = z - otherObj.mesh.position.z;
+                                                const distance = Math.sqrt(dx * dx + dz * dz);
+                                                if (distance < MIN_DISTANCE) {
+                                                    validPosition = false;
+                                                    break;
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    if (validPosition) break;
+                                    attempts++;
+                                } while (attempts < maxAttempts);
+
+                                const y = scaledSize.y / 2;
+                                mesh.position.set(x, y, z);
+                                mesh.rotation.y = Math.random() * Math.PI * 2;
+
+                                // Enable shadows
+                                mesh.traverse((child) => {
+                                    if (child.isMesh) {
+                                        child.castShadow = true;
+                                        child.receiveShadow = true;
+                                        if (child.material) {
+                                            if (child.material.map) {
+                                                child.material.map.colorSpace = THREE.SRGBColorSpace;
+                                            }
+                                            child.material.needsUpdate = true;
+                                        }
+                                    }
+                                });
+
+                                scene.add(mesh);
+
+                                // Create physics body
+                                const halfExtents = new CANNON.Vec3(
+                                    scaledSize.x / 2,
+                                    scaledSize.y / 2,
+                                    scaledSize.z / 2
+                                );
+                                const objectBody = new CANNON.Body({
+                                    mass: 0,
+                                    shape: new CANNON.Box(halfExtents),
+                                    material: groundMaterial
+                                });
+                                objectBody.position.set(x, y, z);
+                                objectBody.quaternion.copy(mesh.quaternion);
+                                world.addBody(objectBody);
+
+                                // Store with metadata
+                                const objIndex = i;
+                                const objType = objIndex < 2 ? 'solution' : 'distractor';
+                                puzzleObjects.push({
+                                    mesh: mesh,
+                                    body: objectBody,
+                                    isPuzzleObject: true,
+                                    puzzleType: objType,
+                                    objectIndex: objIndex,
+                                    preparingForInteraction: true
+                                });
+
+                                console.log(`[SESSION] Placed puzzle object ${i + 1}/${puzzleObjectPaths.length}`);
+
+                            } catch (error) {
+                                console.error(`[SESSION] Error loading puzzle object ${i}:`, error);
+                            }
+                        }
+
+                        console.log('✅ Puzzle objects reloaded from session');
+                    } else {
+                        console.log('[SESSION] No puzzle object models found');
+                    }
+                } else {
+                    console.log('[SESSION] No riddle in session metadata');
+                }
+            } catch (e) {
+                console.error('[SESSION] Error parsing session metadata:', e);
+            }
+        }
 
         // Hide loading modal immediately - no generation needed
         loadingElement.classList.add('hidden');
