@@ -4,7 +4,279 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Three.js - FAL AI Ground Game</title>
+    <!-- Terminal Loading Screen Font -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=VT323&display=swap" rel="stylesheet">
     <style>
+        /* ==================== TERMINAL LOADING SCREEN STYLES ==================== */
+        :root {
+            --terminal-bg-color: #050505;
+            --terminal-term-green: #0f0;
+            --terminal-term-dim: #003300;
+            --terminal-term-bright: #ccffcc;
+            --terminal-glitch-red: #ff0055;
+            --terminal-glitch-blue: #00ffff;
+        }
+
+        /* Terminal Loading Screen Wrapper */
+        #terminal-loading-wrapper {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: var(--terminal-bg-color);
+            color: var(--terminal-term-green);
+            font-family: 'VT323', monospace;
+            overflow: hidden;
+            z-index: 200;
+            display: flex;
+            flex-direction: column;
+        }
+
+        #terminal-loading-wrapper.hidden {
+            display: none !important;
+        }
+
+        #terminal-loading-wrapper * {
+            box-sizing: border-box;
+            user-select: none;
+            cursor: default;
+        }
+
+        /* --- CRT Effects --- */
+        .terminal-scanlines {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(to bottom, rgba(18, 16, 16, 0) 50%, rgba(0, 0, 0, 0.25) 50%);
+            background-size: 100% 4px;
+            z-index: 100;
+            pointer-events: none;
+        }
+
+        .terminal-glow-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            box-shadow: inset 0 0 100px rgba(0, 255, 0, 0.1);
+            z-index: 101;
+            pointer-events: none;
+            animation: terminal-breath 4s ease-in-out infinite;
+        }
+
+        @keyframes terminal-breath {
+            0% { box-shadow: inset 0 0 100px rgba(0, 255, 0, 0.1); }
+            50% { box-shadow: inset 0 0 150px rgba(0, 255, 0, 0.2); }
+            100% { box-shadow: inset 0 0 100px rgba(0, 255, 0, 0.1); }
+        }
+
+        /* --- Background Canvas --- */
+        #terminal-bg-canvas {
+            position: fixed;
+            top: 0;
+            left: 0;
+            z-index: 0;
+            opacity: 0.8;
+        }
+
+        /* --- Camera Overlay UI --- */
+        #terminal-cam-ui {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            text-align: right;
+            color: var(--terminal-term-green);
+            font-size: 1.2rem;
+            z-index: 90;
+            opacity: 0.8;
+            text-shadow: 0 0 5px var(--terminal-term-green);
+        }
+
+        .terminal-rec-dot {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            background-color: var(--terminal-glitch-red);
+            border-radius: 50%;
+            margin-right: 5px;
+            animation: terminal-blinkRec 1s infinite;
+        }
+
+        @keyframes terminal-blinkRec {
+            50% { opacity: 0; }
+        }
+
+        /* --- Main Container --- */
+        #terminal-container {
+            position: relative;
+            z-index: 10;
+            width: 100%;
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            perspective: 1000px;
+        }
+
+        /* --- Boot Log --- */
+        #terminal-boot-log {
+            position: absolute;
+            top: 60px;
+            left: 20px;
+            font-size: 1.2rem;
+            color: var(--terminal-term-green);
+            text-shadow: 0 0 5px var(--terminal-term-green);
+            white-space: pre;
+            line-height: 1.2;
+            z-index: 20;
+            display: block;
+        }
+
+        /* --- Main Menu --- */
+        #terminal-main-menu {
+            text-align: center;
+            opacity: 0;
+            transition: opacity 2s;
+            transform-style: preserve-3d;
+        }
+
+        .terminal-title-wrapper {
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        h1.terminal-glitch-title {
+            font-size: 6rem;
+            margin: 0;
+            position: relative;
+            color: var(--terminal-term-green);
+            letter-spacing: 5px;
+            text-transform: uppercase;
+        }
+
+        h1.terminal-glitch-title::before,
+        h1.terminal-glitch-title::after {
+            content: attr(data-text);
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: var(--terminal-bg-color);
+        }
+
+        h1.terminal-glitch-title::before {
+            left: 2px;
+            text-shadow: -2px 0 var(--terminal-glitch-red);
+            clip: rect(44px, 450px, 56px, 0);
+            animation: terminal-glitch-anim 5s infinite linear alternate-reverse;
+        }
+
+        h1.terminal-glitch-title::after {
+            left: -2px;
+            text-shadow: -2px 0 var(--terminal-glitch-blue);
+            clip: rect(44px, 450px, 56px, 0);
+            animation: terminal-glitch-anim2 5s infinite linear alternate-reverse;
+        }
+
+        .terminal-subtitle {
+            font-size: 1.5rem;
+            letter-spacing: 2px;
+            color: var(--terminal-term-bright);
+            opacity: 0.8;
+            margin-bottom: 50px;
+        }
+
+        /* Buttons */
+        .terminal-btn-group {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+
+        .terminal-cyber-btn {
+            background: rgba(0, 20, 0, 0.6);
+            border: 1px solid var(--terminal-term-green);
+            color: var(--terminal-term-green);
+            font-family: 'VT323', monospace;
+            font-size: 2rem;
+            padding: 10px 40px;
+            cursor: pointer;
+            text-transform: uppercase;
+            position: relative;
+            transition: 0.2s;
+            overflow: hidden;
+        }
+
+        .terminal-cyber-btn:hover {
+            background: var(--terminal-term-green);
+            color: #000;
+            box-shadow: 0 0 20px var(--terminal-term-green);
+        }
+
+        .terminal-cyber-btn::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.2), transparent);
+            transition: 0.5s;
+        }
+
+        .terminal-cyber-btn:hover::before {
+            left: 100%;
+        }
+
+        /* --- Animations --- */
+        @keyframes terminal-glitch-anim {
+            0% { clip: rect(10px, 9999px, 30px, 0); transform: skew(0.5deg); }
+            5% { clip: rect(70px, 9999px, 90px, 0); transform: skew(-0.5deg); }
+            10% { clip: rect(40px, 9999px, 50px, 0); }
+            15% { clip: rect(90px, 9999px, 100px, 0); transform: skew(0.5deg); }
+            100% { clip: rect(10px, 9999px, 30px, 0); }
+        }
+
+        @keyframes terminal-glitch-anim2 {
+            0% { clip: rect(60px, 9999px, 80px, 0); transform: skew(-0.5deg); }
+            5% { clip: rect(20px, 9999px, 30px, 0); transform: skew(0.5deg); }
+            10% { clip: rect(80px, 9999px, 90px, 0); }
+            15% { clip: rect(10px, 9999px, 20px, 0); transform: skew(-0.5deg); }
+            100% { clip: rect(60px, 9999px, 80px, 0); }
+        }
+
+        .terminal-distortion-heavy {
+            animation: terminal-shake 0.2s cubic-bezier(.36,.07,.19,.97) both;
+            filter: hue-rotate(90deg) blur(1px);
+            transform: translateX(5px);
+        }
+
+        @keyframes terminal-shake {
+            10%, 90% { transform: translate3d(-1px, 0, 0); }
+            20%, 80% { transform: translate3d(2px, 0, 0); }
+            30%, 50%, 70% { transform: translate3d(-4px, 0, 0); }
+            40%, 60% { transform: translate3d(4px, 0, 0); }
+        }
+
+        .terminal-footer {
+            position: absolute;
+            bottom: 10px;
+            width: 100%;
+            text-align: center;
+            font-size: 0.8rem;
+            color: var(--terminal-term-dim);
+            z-index: 20;
+        }
+
+        /* ==================== GAME STYLES ==================== */
         body {
             margin: 0;
             padding: 0;
@@ -570,6 +842,40 @@
     </style>
 </head>
 <body>
+    <!-- ==================== TERMINAL LOADING SCREEN ==================== -->
+    <div id="terminal-loading-wrapper">
+        <div class="terminal-scanlines"></div>
+        <div class="terminal-glow-overlay"></div>
+
+        <!-- 3D Lidar Canvas -->
+        <canvas id="terminal-bg-canvas"></canvas>
+
+        <!-- Camera UI Overlay -->
+        <div id="terminal-cam-ui">
+            <div><span class="terminal-rec-dot"></span>CAM_04 [LIVE]</div>
+            <div id="terminal-cam-target">TARGET: SECTOR_A</div>
+            <div id="terminal-cam-coords">X:000 Y:000</div>
+        </div>
+
+        <div id="terminal-boot-log"></div>
+
+        <div id="terminal-container">
+            <div id="terminal-main-menu">
+                <div class="terminal-title-wrapper">
+                    <h1 class="terminal-glitch-title" data-text="TerminalFlux">TerminalFlux</h1>
+                </div>
+                <div class="terminal-subtitle">>> DARE TO GO AGAINST NEMOTRON? <<</div>
+
+                <div class="terminal-btn-group">
+                    <button class="terminal-cyber-btn" id="terminal-initialize-btn">Initialize</button>
+                    <button class="terminal-cyber-btn" id="terminal-abort-btn">Abort</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="terminal-footer">v.4.0.1 // SYSTEM_READY // WAITING_FOR_INPUT</div>
+    </div>
+
     <!-- Session Selection Modal -->
     <div id="session-modal">
         <div class="modal-content">
@@ -826,6 +1132,10 @@
     </div>
 
     <div id="canvas-container"></div>
+
+    <!-- MIDI Player Library -->
+    <script src="https://cdn.jsdelivr.net/npm/midi-parser-js@4.0.4/src/main.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/soundfont-player@0.12.0/dist/soundfont-player.min.js"></script>
 
     <!-- Import Three.js and Cannon.js from CDN -->
     <script type="importmap">

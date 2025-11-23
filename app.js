@@ -1,3 +1,416 @@
+// ==================== TERMINAL LOADING SCREEN ====================
+// Wrapped in IIFE for variable isolation
+(function() {
+    'use strict';
+
+    // Wait for DOM to be ready
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', initTerminalLoadingScreen);
+    } else {
+        initTerminalLoadingScreen();
+    }
+
+    function initTerminalLoadingScreen() {
+        // --- CONFIG ---
+        const canvas = document.getElementById('terminal-bg-canvas');
+        const ctx = canvas.getContext('2d');
+        const bootLog = document.getElementById('terminal-boot-log');
+        const mainMenu = document.getElementById('terminal-main-menu');
+        const camCoords = document.getElementById('terminal-cam-coords');
+        const camTargetLabel = document.getElementById('terminal-cam-target');
+
+        // --- MIDI MUSIC PLAYER ---
+        let midiPlayer = null;
+        let audioContext = null;
+        let currentInstrument = null;
+
+        async function initMusicPlayer() {
+            try {
+                console.log('[MUSIC] Initializing MIDI player...');
+
+                // Create audio context
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+
+                // Load MIDI file
+                const response = await fetch('/assets/music/theme_music.mid');
+                const arrayBuffer = await response.arrayBuffer();
+
+                // Parse MIDI
+                const midi = MidiParser.parse(new Uint8Array(arrayBuffer));
+                console.log('[MUSIC] MIDI file loaded and parsed');
+
+                // Load soundfont instrument (acoustic_grand_piano)
+                currentInstrument = await Soundfont.instrument(audioContext, 'acoustic_grand_piano');
+                console.log('[MUSIC] Soundfont loaded');
+
+                // Start playing
+                playMidiLoop(midi);
+
+            } catch (error) {
+                console.error('[MUSIC] Error loading MIDI:', error);
+            }
+        }
+
+        function playMidiLoop(midi) {
+            if (!midi || !midi.track || !currentInstrument) {
+                console.error('[MUSIC] Invalid MIDI data or instrument not loaded');
+                return;
+            }
+
+            // Combine all tracks
+            const notes = [];
+            midi.track.forEach(track => {
+                let currentTime = 0;
+                track.event.forEach(event => {
+                    currentTime += event.deltaTime;
+                    if (event.type === 9 && event.data[1] > 0) { // Note on
+                        notes.push({
+                            time: currentTime,
+                            note: event.data[0],
+                            velocity: event.data[1],
+                            duration: 500 // Default duration
+                        });
+                    }
+                });
+            });
+
+            // Convert MIDI ticks to seconds (assuming 480 ticks per beat, 120 BPM)
+            const ticksPerBeat = midi.timeDivision || 480;
+            const bpm = 120;
+            const secondsPerTick = 60.0 / (bpm * ticksPerBeat);
+
+            // Schedule all notes
+            const startTime = audioContext.currentTime;
+            let maxTime = 0;
+
+            notes.forEach(note => {
+                const time = startTime + (note.time * secondsPerTick);
+                maxTime = Math.max(maxTime, time);
+
+                // Convert MIDI note number to frequency
+                const frequency = 440 * Math.pow(2, (note.note - 69) / 12);
+
+                // Schedule note with soundfont
+                currentInstrument.play(note.note, time, {
+                    duration: note.duration / 1000,
+                    gain: note.velocity / 127
+                });
+            });
+
+            // Schedule loop restart
+            const loopDuration = maxTime - startTime + 1; // Add 1 second buffer
+            setTimeout(() => {
+                console.log('[MUSIC] Looping theme music...');
+                playMidiLoop(midi);
+            }, loopDuration * 1000);
+        }
+
+        // Start music immediately (with user interaction fallback)
+        function startMusic() {
+            if (!midiPlayer) {
+                initMusicPlayer().then(() => {
+                    console.log('[MUSIC] Theme music started');
+                }).catch(err => {
+                    console.error('[MUSIC] Failed to start:', err);
+                });
+            }
+        }
+
+        // Try to start music immediately
+        startMusic();
+
+        // Also start on first user interaction if autoplay blocked
+        const startOnInteraction = () => {
+            startMusic();
+            document.removeEventListener('click', startOnInteraction);
+            document.removeEventListener('keydown', startOnInteraction);
+        };
+        document.addEventListener('click', startOnInteraction, { once: true });
+        document.addEventListener('keydown', startOnInteraction, { once: true });
+
+        // --- 3D LIDAR ENGINE SETUP ---
+        let points = [];
+        let fov = 400;
+        let activeWalls = [];
+
+        // --- SCENE GENERATION ---
+        function addPoint(x, y, z) { points.push({ x, y, z }); }
+
+        function generateRoom() {
+            const gridSize = 800;
+            const step = 40;
+            for(let x = -gridSize; x <= gridSize; x += step) {
+                for(let z = -gridSize; z <= gridSize; z += step) {
+                    if(Math.random() > 0.05) addPoint(x, 300, z);
+                    if(Math.random() > 0.8) addPoint(x, -300, z);
+                }
+            }
+        }
+
+        function generateHuman(offsetX, offsetZ) {
+            for(let y = 300; y > 220; y-=5) {
+                for(let i=0; i<6; i++) {
+                    addPoint(offsetX - 10 + Math.random()*20, y, offsetZ - 5 + Math.random()*10);
+                    addPoint(offsetX + 10 + Math.random()*20, y, offsetZ - 5 + Math.random()*10);
+                }
+            }
+            for(let y = 220; y > 150; y-=5) {
+                for(let i=0; i<15; i++) {
+                    let r = 20; let theta = Math.random() * Math.PI * 2;
+                    addPoint(offsetX + Math.cos(theta)*r, y, offsetZ + Math.sin(theta)*r);
+                }
+            }
+            for(let y = 150; y > 120; y-=3) {
+                for(let i=0; i<10; i++) {
+                    let r = 10; let theta = Math.random() * Math.PI * 2;
+                    addPoint(offsetX + Math.cos(theta)*r, y, offsetZ + Math.sin(theta)*r);
+                }
+            }
+        }
+
+        // --- DYNAMIC WALLS ---
+        class DataWall {
+            constructor() {
+                this.axis = Math.random() > 0.5 ? 'x' : 'z';
+
+                let dist = 100 + Math.random() * 400;
+                let sign = Math.random() > 0.5 ? 1 : -1;
+                let pos1 = dist * sign;
+                let pos2 = (Math.random() - 0.5) * 800;
+
+                if (this.axis === 'x') {
+                    this.x = pos2; this.z = pos1;
+                } else {
+                    this.x = pos1; this.z = pos2;
+                }
+
+                this.length = 150 + Math.random() * 300;
+                this.height = 0;
+                this.targetHeight = 200 + Math.random() * 100;
+
+                this.state = 0;
+                this.timer = 0;
+                this.holdTime = 100 + Math.random() * 200;
+            }
+
+            update() {
+                if (this.state === 0) {
+                    this.height += 4;
+                    if (this.height >= this.targetHeight) this.state = 1;
+                } else if (this.state === 1) {
+                    this.timer++;
+                    if (this.timer >= this.holdTime) this.state = 2;
+                } else if (this.state === 2) {
+                    this.height -= 4;
+                    if (this.height <= 0) return false;
+                }
+                return true;
+            }
+
+            generatePoints() {
+                const p = [];
+                const spacing = 15;
+                const start = -this.length / 2;
+                const end = this.length / 2;
+                const floorY = 300;
+
+                for (let l = start; l <= end; l += spacing) {
+                    for (let h = 0; h < this.height; h += spacing) {
+                        let px, pz;
+                        if (this.axis === 'x') {
+                            px = this.x + l; pz = this.z;
+                        } else {
+                            px = this.x; pz = this.z + l;
+                        }
+                        p.push({ x: px, y: floorY - h, z: pz });
+                    }
+                }
+                return p;
+            }
+        }
+
+        // Initialize Scene
+        generateRoom();
+        const human1 = { x: 0, z: 0 };
+        const human2 = { x: -300, z: 200 };
+        const human3 = { x: 300, z: -200 };
+        generateHuman(human1.x, human1.z);
+        generateHuman(human2.x, human2.z);
+        generateHuman(human3.x, human3.z);
+
+        function resize() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+        }
+        window.addEventListener('resize', resize);
+        resize();
+
+        // --- CAMERA STATE MACHINE ---
+        let camState = {
+            angle: 0,
+            dist: 1200,
+            y: -500,
+            pivotX: 0,
+            pivotZ: 0,
+            speed: 0.002
+        };
+
+        let targetState = { ...camState };
+        let lastSwitchTime = 0;
+        let sequenceIndex = 0;
+
+        const sequence = [
+            { label: "WIDE_SCAN",   dist: 1200, y: -600, px: 0, pz: 0,           speed: 0.002, duration: 3000 },
+            { label: "TARGET_ALPHA", dist: 450,  y: -200, px: human1.x, pz: human1.z, speed: 0.003, duration: 2500 },
+            { label: "TARGET_BRAVO", dist: 450,  y: -200, px: human2.x, pz: human2.z, speed: 0.003, duration: 2500 },
+            { label: "TARGET_CHARLIE", dist: 450,  y: -200, px: human3.x, pz: human3.z, speed: 0.003, duration: 2500 },
+            { label: "WIDE_SCAN",   dist: 1200, y: -600, px: 0, pz: 0,           speed: 0.002, duration: 3000 }
+        ];
+
+        function updateCameraLogic(now) {
+            const currentSeq = sequence[sequenceIndex];
+
+            if (now - lastSwitchTime > currentSeq.duration) {
+                sequenceIndex = (sequenceIndex + 1) % sequence.length;
+                lastSwitchTime = now;
+
+                const next = sequence[sequenceIndex];
+                targetState.dist = next.dist;
+                targetState.y = next.y;
+                targetState.pivotX = next.px;
+                targetState.pivotZ = next.pz;
+                targetState.speed = next.speed;
+
+                camTargetLabel.innerText = "TARGET: " + next.label;
+                triggerGlitch();
+            }
+
+            const ease = 0.04;
+            camState.dist += (targetState.dist - camState.dist) * ease;
+            camState.y += (targetState.y - camState.y) * ease;
+            camState.pivotX += (targetState.pivotX - camState.pivotX) * ease;
+            camState.pivotZ += (targetState.pivotZ - camState.pivotZ) * ease;
+            camState.speed += (targetState.speed - camState.speed) * ease;
+            camState.angle += camState.speed;
+        }
+
+        // --- WALL MANAGER ---
+        function updateWalls() {
+            activeWalls = activeWalls.filter(w => w.update());
+
+            if (activeWalls.length < 4 && Math.random() > 0.98) {
+                activeWalls.push(new DataWall());
+            }
+        }
+
+        // --- RENDER LOOP ---
+        function draw3D() {
+            const now = performance.now();
+            updateCameraLogic(now);
+            updateWalls();
+
+            ctx.fillStyle = 'rgba(5, 5, 5, 1)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            const cx = canvas.width / 2;
+            const cy = canvas.height / 2;
+
+            const noiseY = Math.sin(now / 500) * 10;
+
+            if (Math.random() > 0.9) {
+                camCoords.innerText = `X:${Math.floor(camState.pivotX)} Z:${Math.floor(camState.pivotZ)} D:${Math.floor(camState.dist)}`;
+            }
+
+            let renderList = [...points];
+            activeWalls.forEach(w => {
+                renderList = renderList.concat(w.generatePoints());
+            });
+
+            renderList.forEach(p => {
+                const relX = p.x - camState.pivotX;
+                const relZ = p.z - camState.pivotZ;
+
+                let x = relX * Math.cos(camState.angle) - relZ * Math.sin(camState.angle);
+                let z = relZ * Math.cos(camState.angle) + relX * Math.sin(camState.angle);
+
+                let y = p.y - (camState.y + noiseY);
+                z += camState.dist;
+
+                if (z > 10) {
+                    let scale = fov / z;
+                    let sx = x * scale + cx;
+                    let sy = y * scale + cy;
+
+                    let alpha = 1 - (z / 2500);
+                    if(alpha < 0) alpha = 0;
+
+                    ctx.fillStyle = `rgba(${0 + (1-alpha)*50}, 255, ${0 + (1-alpha)*50}, ${alpha})`;
+
+                    let size = scale * 2.5;
+                    ctx.fillRect(sx, sy, size, size);
+                }
+            });
+
+            requestAnimationFrame(draw3D);
+        }
+
+        draw3D();
+
+        // --- BOOT SEQUENCE ---
+        const bootLines = [
+            "Loading Kernel...",
+            "Mounting File System...",
+            "Scanning Ports...",
+            "Connecting to Neural Net...",
+            "Bypassing Firewall (Port 8080)...",
+            "Access Granted.",
+            "Initializing Lidar Tracking...",
+            "Subject Alpha: LOCATED",
+            "Subject Bravo: LOCATED",
+            "Subject Charlie: LOCATED",
+            "Live Feed Established."
+        ];
+
+        let lineIndex = 0;
+        function runBootSequence() {
+            if (lineIndex < bootLines.length) {
+                const div = document.createElement('div');
+                div.textContent = `> ${bootLines[lineIndex]}`;
+                bootLog.appendChild(div);
+                lineIndex++;
+                setTimeout(runBootSequence, Math.random() * 200 + 50);
+            } else {
+                setTimeout(() => {
+                    bootLog.style.display = 'none';
+                    mainMenu.style.opacity = '1';
+                    startRandomGlitches();
+                }, 800);
+            }
+        }
+        runBootSequence();
+
+        // --- GLITCH SYSTEM ---
+        function triggerGlitch() {
+            const wrapper = document.getElementById('terminal-loading-wrapper');
+            wrapper.classList.add('terminal-distortion-heavy');
+
+            if (Math.random() > 0.5) mainMenu.style.transform = `skewX(${Math.random() * 20 - 10}deg)`;
+
+            setTimeout(() => {
+                wrapper.classList.remove('terminal-distortion-heavy');
+                mainMenu.style.transform = 'none';
+                scheduleNextGlitch();
+            }, Math.random() * 200 + 50);
+        }
+
+        function scheduleNextGlitch() {
+            setTimeout(triggerGlitch, Math.random() * 8000 + 3000);
+        }
+        function startRandomGlitches() { scheduleNextGlitch(); }
+    }
+})();
+
+// ==================== MAIN GAME CODE ====================
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
@@ -663,6 +1076,46 @@ function hideCongratulationsModal() {
         modal.classList.add('hidden');
     }
 }
+
+// ==================== TERMINAL LOADING SCREEN BUTTON HANDLERS ====================
+// Wire Initialize and Abort buttons
+document.addEventListener('DOMContentLoaded', () => {
+    const terminalWrapper = document.getElementById('terminal-loading-wrapper');
+    const sessionModal = document.getElementById('session-modal');
+    const initializeBtn = document.getElementById('terminal-initialize-btn');
+    const abortBtn = document.getElementById('terminal-abort-btn');
+
+    // Initialize button: hide loading screen and show session modal
+    if (initializeBtn) {
+        initializeBtn.addEventListener('click', () => {
+            console.log('[TERMINAL] Initialize button clicked - starting game');
+            // Hide terminal loading screen
+            if (terminalWrapper) {
+                terminalWrapper.classList.add('hidden');
+            }
+            // Show session modal (existing game entry point)
+            if (sessionModal) {
+                sessionModal.classList.remove('hidden');
+                sessionModal.style.display = '';
+            }
+        });
+    }
+
+    // Abort button: confirm and close window
+    if (abortBtn) {
+        abortBtn.addEventListener('click', () => {
+            console.log('[TERMINAL] Abort button clicked');
+            const confirmed = confirm('Are you sure you want to abort? This will close the application.');
+            if (confirmed) {
+                window.close();
+                // Fallback if window.close() doesn't work (some browsers block it)
+                if (!window.closed) {
+                    alert('Please close this tab manually.');
+                }
+            }
+        });
+    }
+});
 
 // Set up image viewer modal close handlers
 document.addEventListener('DOMContentLoaded', () => {
@@ -3642,10 +4095,17 @@ async function initializeApp() {
         characterInput.focus();
     });
 
-    // Show session modal initially
-    document.getElementById('session-modal').classList.remove('hidden');
+    // IMPORTANT: Keep session modal hidden initially - Terminal loading screen shows first!
+    // Session modal will be shown by Initialize button click
+    const sessionModal = document.getElementById('session-modal');
+    sessionModal.classList.add('hidden');
+    sessionModal.style.display = 'none';
+
+    // Also hide character and loading modals
     characterModal.classList.add('hidden');
+    characterModal.style.display = 'none';
     loadingElement.classList.add('hidden');
+    loadingElement.style.display = 'none';
 }
 
 // Handle character submission
