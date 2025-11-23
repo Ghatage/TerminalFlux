@@ -185,6 +185,10 @@ let environmentalObjects = []; // Store {mesh, body} pairs for physics sync
 let environmentalMeshes = [];
 let environmentalBodies = [];
 
+// Universal interactable objects registry
+let interactableObjects = []; // Store {mesh, loreDescription, modelUrl, objectType}
+let nearestInteractableObject = null; // Track which object player is currently near
+
 // Altar and Nemotron model
 let altarMesh;
 let altarBody;
@@ -295,6 +299,214 @@ function hideNemotronDialogue() {
     console.log('[INTERACTION] Nemotron dialogue hidden');
 }
 
+// Register an object for universal interaction system
+function registerInteractableObject(mesh, loreDescription, modelUrl, objectType) {
+    if (!mesh || !loreDescription) {
+        console.warn('[INTERACTION] Cannot register object - missing mesh or loreDescription');
+        return;
+    }
+
+    interactableObjects.push({
+        mesh: mesh,
+        loreDescription: loreDescription,
+        modelUrl: modelUrl || null,
+        objectType: objectType || 'unknown'
+    });
+
+    console.log(`[INTERACTION] Registered ${objectType} object for interaction (total: ${interactableObjects.length})`);
+}
+
+// ==================== OBJECT VIEWER MINI SCENE ====================
+// Separate Three.js scene for viewing individual objects
+
+let viewerScene;
+let viewerCamera;
+let viewerRenderer;
+let viewerModel;
+let viewerAnimationId;
+
+// Initialize the object viewer scene
+function initObjectViewer() {
+    const canvas = document.getElementById('object-viewer-canvas');
+    const container = document.getElementById('object-viewer-canvas-container');
+
+    if (!canvas || !container) {
+        console.error('[VIEWER] Canvas or container not found');
+        return;
+    }
+
+    // Create scene
+    viewerScene = new THREE.Scene();
+    viewerScene.background = new THREE.Color(0x1a0a24); // Dark purple background
+
+    // Create camera
+    const aspect = 500 / 400; // Match canvas dimensions
+    viewerCamera = new THREE.PerspectiveCamera(45, aspect, 0.1, 1000);
+    viewerCamera.position.set(0, 1, 3);
+    viewerCamera.lookAt(0, 0, 0);
+
+    // Create renderer
+    viewerRenderer = new THREE.WebGLRenderer({ canvas: canvas, antialias: true });
+    viewerRenderer.setSize(500, 400);
+    viewerRenderer.setPixelRatio(window.devicePixelRatio);
+    viewerRenderer.shadowMap.enabled = true;
+    viewerRenderer.outputColorSpace = THREE.SRGBColorSpace;
+    viewerRenderer.toneMapping = THREE.ACESFilmicToneMapping;
+    viewerRenderer.toneMappingExposure = 1.5;
+
+    // Add lights
+    const ambientLight = new THREE.AmbientLight(0xffffff, 1.0);
+    viewerScene.add(ambientLight);
+
+    const directionalLight1 = new THREE.DirectionalLight(0xffffff, 1.5);
+    directionalLight1.position.set(2, 3, 2);
+    viewerScene.add(directionalLight1);
+
+    const directionalLight2 = new THREE.DirectionalLight(0xffffff, 1.0);
+    directionalLight2.position.set(-2, 2, -2);
+    viewerScene.add(directionalLight2);
+
+    const fillLight = new THREE.PointLight(0x39ff14, 0.5, 10);
+    fillLight.position.set(0, 2, 0);
+    viewerScene.add(fillLight);
+
+    console.log('[VIEWER] Object viewer scene initialized');
+}
+
+// Load and display an object in the viewer
+async function loadObjectInViewer(modelUrl, loreDescription) {
+    if (!viewerScene) {
+        initObjectViewer();
+    }
+
+    console.log(`[VIEWER] Loading object: ${modelUrl}`);
+
+    try {
+        // Remove previous model if exists
+        if (viewerModel) {
+            viewerScene.remove(viewerModel);
+            viewerModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry?.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load new model
+        const gltf = await new Promise((resolve, reject) => {
+            gltfLoader.load(
+                modelUrl + '?t=' + Date.now(),
+                resolve,
+                undefined,
+                reject
+            );
+        });
+
+        viewerModel = gltf.scene;
+
+        // Scale model to fit viewer nicely
+        const box = new THREE.Box3().setFromObject(viewerModel);
+        const size = box.getSize(new THREE.Vector3());
+        const maxDim = Math.max(size.x, size.y, size.z);
+        const scale = 1.5 / maxDim; // Scale to fit in viewer
+        viewerModel.scale.set(scale, scale, scale);
+
+        // Center the model
+        box.setFromObject(viewerModel);
+        const center = box.getCenter(new THREE.Vector3());
+        viewerModel.position.sub(center);
+
+        // Enable proper materials
+        viewerModel.traverse((child) => {
+            if (child.isMesh) {
+                child.castShadow = true;
+                child.receiveShadow = true;
+                if (child.material) {
+                    if (child.material.map) {
+                        child.material.map.colorSpace = THREE.SRGBColorSpace;
+                    }
+                    child.material.needsUpdate = true;
+                }
+            }
+        });
+
+        viewerScene.add(viewerModel);
+        console.log('[VIEWER] Object loaded successfully');
+
+        // Update description
+        const descElement = document.getElementById('object-viewer-description');
+        if (descElement) {
+            descElement.textContent = loreDescription || 'A mysterious object from this world...';
+        }
+
+        // Start animation loop
+        animateObjectViewer();
+
+    } catch (error) {
+        console.error('[VIEWER] Error loading object:', error);
+    }
+}
+
+// Animation loop for object viewer (rotate object)
+function animateObjectViewer() {
+    // Cancel previous animation if exists
+    if (viewerAnimationId) {
+        cancelAnimationFrame(viewerAnimationId);
+    }
+
+    function animate() {
+        viewerAnimationId = requestAnimationFrame(animate);
+
+        // Rotate model slowly
+        if (viewerModel) {
+            viewerModel.rotation.y += 0.01;
+        }
+
+        viewerRenderer.render(viewerScene, viewerCamera);
+    }
+
+    animate();
+}
+
+// Show object viewer modal with object
+function showObjectViewer(object) {
+    if (!object || !object.modelUrl) {
+        console.warn('[VIEWER] Cannot show object - missing modelUrl');
+        return;
+    }
+
+    console.log(`[VIEWER] Showing object viewer for ${object.objectType}`);
+
+    const modal = document.getElementById('object-viewer-modal');
+    if (modal) {
+        modal.classList.remove('hidden');
+        loadObjectInViewer(object.modelUrl, object.loreDescription);
+    }
+}
+
+// Hide object viewer modal
+function hideObjectViewer() {
+    console.log('[VIEWER] Hiding object viewer');
+
+    const modal = document.getElementById('object-viewer-modal');
+    if (modal) {
+        modal.classList.add('hidden');
+    }
+
+    // Stop animation loop
+    if (viewerAnimationId) {
+        cancelAnimationFrame(viewerAnimationId);
+        viewerAnimationId = null;
+    }
+}
+
 // Set up image viewer modal close handlers
 document.addEventListener('DOMContentLoaded', () => {
     const imageViewerModal = document.getElementById('image-viewer-modal');
@@ -333,6 +545,15 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
+    // Add close handler for Object Viewer modal
+    const objectViewerModal = document.getElementById('object-viewer-modal');
+    const objectViewerCloseBtn = document.getElementById('object-viewer-close');
+    if (objectViewerCloseBtn) {
+        objectViewerCloseBtn.addEventListener('click', () => {
+            hideObjectViewer();
+        });
+    }
+
     // Close on ESC key
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
@@ -348,6 +569,10 @@ document.addEventListener('DOMContentLoaded', () => {
             // Also allow ESC to close Nemotron modal
             if (nemotronModal && !nemotronModal.classList.contains('hidden')) {
                 hideNemotronDialogue();
+            }
+            // Also allow ESC to close Object Viewer modal
+            if (objectViewerModal && !objectViewerModal.classList.contains('hidden')) {
+                hideObjectViewer();
             }
         }
     });
@@ -655,6 +880,19 @@ async function generatePuzzleObject(objectDesc, objectType, objectIndex, session
     console.log(`[PUZZLE] Generating puzzle object ${objectIndex} (${objectType})...`);
 
     try {
+        // Step 0: Generate lore-friendly description via Claude
+        const llmPrompt = `Given this object description: "${objectDesc.description}", create a lore-friendly atmospheric description (2-3 sentences) that explains what this object is and why a player might encounter it in their adventure. Make it mysterious and engaging.`;
+
+        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: llmPrompt })
+        });
+        const llmData = await llmResponse.json();
+
+        const loreDescription = llmData.success ? llmData.answer : objectDesc.description;
+        console.log(`[PUZZLE] Generated lore for object ${objectIndex}`);
+
         // Step 1: Generate image with white background
         const imagePrompt = `Ultra high quality 3D object, ${objectDesc.description}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
 
@@ -704,6 +942,7 @@ async function generatePuzzleObject(objectDesc, objectType, objectIndex, session
             success: true,
             modelUrl: modelData.modelUrl,
             description: objectDesc.description,
+            loreDescription: loreDescription, // Add lore description for interaction
             type: objectType,
             objectIndex: objectIndex
         };
@@ -865,8 +1104,18 @@ async function placePuzzleObjects(objectModels, existingObjects) {
                 puzzleType: objData.type, // 'solution' or 'distractor'
                 objectIndex: objData.objectIndex,
                 description: objData.description,
+                loreDescription: objData.loreDescription || objData.description,
+                modelUrl: objData.modelUrl, // Store model URL for viewer
                 preparingForInteraction: true // Flag for future inventory system
             });
+
+            // Register for universal interaction system
+            registerInteractableObject(
+                mesh,
+                objData.loreDescription || objData.description,
+                objData.modelUrl,
+                `puzzle_${objData.type}`
+            );
 
             console.log(`[PUZZLE] Placed ${objData.type} object ${i + 1}/${objectModels.length} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
 
@@ -1088,10 +1337,22 @@ async function createEnv(character, sessionId, objectType = 'object') {
     console.log(`[ENV] Generating ${typeLabel} for character: ${character}...`);
 
     try {
-        // Step 1: Ask LLM for object description
+        // Step 1: Ask LLM for BOTH visual AND lore descriptions
         const llmPrompt = objectType === 'tree'
-            ? `You are a game environment designer. Given this character: "${character}", describe a type of TREE that would fit thematically in this character's world. Be specific about the tree type, size, and appearance. Respond with ONLY a concise 2-3 sentence description of the tree, nothing else.`
-            : `You are a game environment designer. Given this character: "${character}", describe a recurring environmental object or prop that would fit thematically in this character's world. It should be a distinctive object that adds to the atmosphere. Respond with ONLY a concise 2-3 sentence description of the object, nothing else.`;
+            ? `You are a game environment designer. Given this character: "${character}", generate TWO descriptions for a TREE that fits thematically in this character's world:
+
+1. VISUAL DESCRIPTION (for image-to-3D generation): A detailed, technical description of the tree's appearance - specific about type, size, materials, and visual features. This will be used to generate a 3D model.
+
+2. LORE-FRIENDLY DESCRIPTION (for player interaction): A narrative, atmospheric description (2-3 sentences) explaining what this tree is, why it exists in this character's world, and what makes it special or significant to the setting.
+
+Be specific and creative.`
+            : `You are a game environment designer. Given this character: "${character}", generate TWO descriptions for a recurring environmental object or prop that fits thematically in this character's world:
+
+1. VISUAL DESCRIPTION (for image-to-3D generation): A detailed, technical description of the object's appearance - specific about materials, size, shape, and visual features. This will be used to generate a 3D model.
+
+2. LORE-FRIENDLY DESCRIPTION (for player interaction): A narrative, atmospheric description (2-3 sentences) explaining what this object is, why it exists in this character's world, and what makes it special or significant to the setting.
+
+Be specific and creative.`;
 
         const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
             method: 'POST',
@@ -1106,6 +1367,11 @@ async function createEnv(character, sessionId, objectType = 'object') {
 
         const objectDescription = llmData.answer;
         console.log(`[ENV] LLM generated ${typeLabel} description:`, objectDescription);
+
+        // Parse the response to extract visual and lore descriptions
+        // The LLM should return both descriptions in the answer
+        // For now, we'll use the full answer as visual description and extract lore
+        const loreDescription = objectDescription; // Full description includes lore context
 
         // Step 2: Generate image with white background
         const imagePrompt = `Ultra high quality 3D ${objectType === 'tree' ? 'tree' : 'object'}, ${objectDescription}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
@@ -1156,6 +1422,7 @@ async function createEnv(character, sessionId, objectType = 'object') {
             success: true,
             modelUrl: modelData.modelUrl,
             description: objectDescription,
+            loreDescription: loreDescription, // Add lore description to return value
             objectType: objectType
         };
 
@@ -1165,8 +1432,97 @@ async function createEnv(character, sessionId, objectType = 'object') {
     }
 }
 
+// Create character-themed objects (same pipeline as createEnv but character-specific)
+async function createCharacterThemedObject(character, sessionId, objectIndex) {
+    console.log(`[CHARACTER-THEMED] Generating character-themed object ${objectIndex} for: ${character}...`);
+
+    try {
+        // Step 1: Ask LLM for BOTH visual AND lore descriptions
+        const llmPrompt = `You are a game environment designer. Given this character: "${character}", generate TWO descriptions for a character-themed prop or object ${objectIndex + 1} that is directly related to this character's identity, profession, or background:
+
+1. VISUAL DESCRIPTION (for image-to-3D generation): A detailed, technical description of the object's appearance - specific about materials, size, shape, and visual features. This object should be DIRECTLY associated with this character type (e.g., weapon, tool, equipment, personal item). This will be used to generate a 3D model.
+
+2. LORE-FRIENDLY DESCRIPTION (for player interaction): A narrative, atmospheric description (2-3 sentences) explaining what this object is, how it relates to the character, and why a player would recognize it as belonging to this character type.
+
+Make the object unique and thematically appropriate to the character.`;
+
+        const llmResponse = await fetch('http://localhost:8081/api/llm/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt: llmPrompt })
+        });
+        const llmData = await llmResponse.json();
+
+        if (!llmData.success) {
+            throw new Error('LLM query failed: ' + llmData.error);
+        }
+
+        const objectDescription = llmData.answer;
+        const loreDescription = objectDescription; // Full description includes lore context
+        console.log(`[CHARACTER-THEMED] LLM generated object ${objectIndex} description:`, objectDescription);
+
+        // Step 2: Generate image with white background
+        const imagePrompt = `Ultra high quality 3D object, ${objectDescription}, neutral white background, studio lighting setup, front view, highly detailed, perfect for 3D reconstruction, clean silhouette, 8K resolution, photorealistic, no shadows on ground, object centered in frame`;
+
+        const imageResponse = await fetch('http://localhost:8081/api/generate-character', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                pose: `character_themed_${objectIndex}`,
+                character: imagePrompt,
+                sessionId: sessionId
+            })
+        });
+        const imageData = await imageResponse.json();
+
+        if (!imageData.success) {
+            throw new Error('Image generation failed: ' + imageData.error);
+        }
+
+        console.log(`[CHARACTER-THEMED] Object ${objectIndex} image generated:`, imageData.imageUrl);
+        addImageToGallery(imageData.remoteUrl || imageData.imageUrl, `Character Object ${objectIndex + 1}`);
+
+        // Ensure we have remote URL for Trellis
+        if (!imageData.remoteUrl) {
+            throw new Error('No remote URL returned from image generation - Trellis requires remote URLs');
+        }
+
+        // Step 3: Generate 3D model with Trellis - use REMOTE URL only
+        const modelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                imageUrls: [imageData.remoteUrl],
+                pose: `character_themed_${objectIndex}`,
+                modelType: userModelType,
+                sessionId: sessionId
+            })
+        });
+        const modelData = await modelResponse.json();
+
+        if (!modelData.success) {
+            throw new Error('3D model generation failed: ' + modelData.error);
+        }
+
+        console.log(`[CHARACTER-THEMED] Object ${objectIndex} 3D model generated:`, modelData.modelUrl);
+
+        return {
+            success: true,
+            modelUrl: modelData.modelUrl,
+            description: objectDescription,
+            loreDescription: loreDescription,
+            objectType: 'character_themed',
+            objectIndex: objectIndex
+        };
+
+    } catch (error) {
+        console.error(`[CHARACTER-THEMED] Error generating object ${objectIndex}:`, error);
+        return { success: false, error: error.message };
+    }
+}
+
 // Place environmental objects randomly on ground with physics
-async function placeEnvironmentalObjects(modelUrl, count, objectType, description) {
+async function placeEnvironmentalObjects(modelUrl, count, objectType, description, loreDescription = null) {
     const typeLabel = objectType === 'tree' ? 'Tree' : 'Object';
     console.log(`[ENV] Placing ${count} copies of ${typeLabel}...`);
 
@@ -1286,10 +1642,20 @@ async function placeEnvironmentalObjects(modelUrl, count, objectType, descriptio
 
             world.addBody(objectBody);
 
-            // Store references
-            environmentalObjects.push({ mesh, body: objectBody });
+            // Store references with lore description for interaction
+            environmentalObjects.push({
+                mesh,
+                body: objectBody,
+                isEnvironmental: true,
+                objectType: objectType,
+                loreDescription: loreDescription || `A ${objectType} from this world.`,
+                modelUrl: modelUrl // Store model URL for viewer
+            });
             environmentalMeshes.push(mesh);
             environmentalBodies.push(objectBody);
+
+            // Register for universal interaction system
+            registerInteractableObject(mesh, loreDescription || `A ${objectType} from this world.`, modelUrl, objectType);
 
             console.log(`[ENV] Placed ${typeLabel} ${i + 1}/${count} at (${x.toFixed(1)}, ${z.toFixed(1)})`);
 
@@ -1694,12 +2060,14 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         const riddleGenerationPromise = generateRiddlePuzzle(currentSessionId);
 
         // ==================== ENV OBJECTS: Start generation in background ====================
-        updateLoadingUI('🌲 Starting environmental generation...', 'Creating thematic props and trees');
-        console.log('🌲 ENV: Starting environmental objects and trees generation...');
+        updateLoadingUI('🌲 Starting environmental generation...', 'Creating thematic props, trees, and character objects');
+        console.log('🌲 ENV: Starting environmental objects, trees, and character-themed objects generation...');
 
         const envPromises = [
             createEnv(character, currentSessionId, 'object'),
-            createEnv(character, currentSessionId, 'tree')
+            createEnv(character, currentSessionId, 'tree'),
+            // Generate 5 character-themed objects in parallel
+            ...Array.from({ length: 5 }, (_, i) => createCharacterThemedObject(character, currentSessionId, i))
         ];
 
         // Don't await yet - let them run in background while we do Phase 2
@@ -1820,23 +2188,36 @@ async function generateAllAssets(character = 'sci-fi robot warrior') {
         console.log('🌲 ENV: Waiting for environmental object generation to complete...');
 
         const envResults = await envGenerationPromise;
-        const [objectResult, treeResult] = envResults;
+        const objectResult = envResults[0];
+        const treeResult = envResults[1];
+        const characterThemedResults = envResults.slice(2); // Remaining 5 are character-themed objects
 
         if (objectResult.success) {
             console.log('✅ Environmental object model ready:', objectResult.description);
-            await placeEnvironmentalObjects(objectResult.modelUrl, 5, 'object', objectResult.description);
+            await placeEnvironmentalObjects(objectResult.modelUrl, 5, 'object', objectResult.description, objectResult.loreDescription);
         } else {
             console.warn('⚠️ Environmental object generation failed:', objectResult.error);
         }
 
         if (treeResult.success) {
             console.log('✅ Tree model ready:', treeResult.description);
-            await placeEnvironmentalObjects(treeResult.modelUrl, 5, 'tree', treeResult.description);
+            await placeEnvironmentalObjects(treeResult.modelUrl, 5, 'tree', treeResult.description, treeResult.loreDescription);
         } else {
             console.warn('⚠️ Tree generation failed:', treeResult.error);
         }
 
-        console.log('🎉 Environmental objects complete!');
+        // Place character-themed objects (each one is unique, so place 1 copy each)
+        for (let i = 0; i < characterThemedResults.length; i++) {
+            const charObj = characterThemedResults[i];
+            if (charObj.success) {
+                console.log(`✅ Character-themed object ${i + 1} ready:`, charObj.description);
+                await placeEnvironmentalObjects(charObj.modelUrl, 1, 'character_themed', charObj.description, charObj.loreDescription);
+            } else {
+                console.warn(`⚠️ Character-themed object ${i + 1} generation failed:`, charObj.error);
+            }
+        }
+
+        console.log('🎉 Environmental and character-themed objects complete!');
 
         // ==================== CREATE ALTAR & NEMOTRON ====================
         updateLoadingUI('🏛️ Creating altar and Nemotron...', 'Setting up interactive elements');
@@ -2255,14 +2636,42 @@ function animate() {
     purpleLight.position.x = Math.cos(time * 0.7) * 5;
     purpleLight.position.z = Math.sin(time * 0.7) * 5;
 
-    // Check proximity to Nemotron for interaction prompt
-    if (characterModel && nemotronModel && gameplayMode) {
-        const distance = characterModel.position.distanceTo(nemotronModel.position);
-        const INTERACTION_DISTANCE = 4; // 4 units (medium distance as specified)
+    // Check proximity to ALL interactable objects (universal system)
+    if (characterModel && gameplayMode) {
+        const INTERACTION_DISTANCE = 4; // 4 units for all objects
+        let closestObject = null;
+        let closestDistance = INTERACTION_DISTANCE;
 
-        if (distance <= INTERACTION_DISTANCE) {
+        // Check Nemotron first (special case with its own modal)
+        if (nemotronModel) {
+            const distance = characterModel.position.distanceTo(nemotronModel.position);
+            if (distance <= INTERACTION_DISTANCE) {
+                closestObject = {
+                    isNemotron: true,
+                    mesh: nemotronModel,
+                    distance: distance
+                };
+                closestDistance = distance;
+            }
+        }
+
+        // Check all registered interactable objects
+        for (const obj of interactableObjects) {
+            if (obj.mesh) {
+                const distance = characterModel.position.distanceTo(obj.mesh.position);
+                if (distance < closestDistance) {
+                    closestObject = obj;
+                    closestDistance = distance;
+                }
+            }
+        }
+
+        // Update UI based on closest object
+        if (closestObject) {
+            nearestInteractableObject = closestObject;
             showInteractionPrompt(true);
         } else {
+            nearestInteractableObject = null;
             showInteractionPrompt(false);
         }
     }
@@ -2511,16 +2920,18 @@ window.addEventListener('keydown', (event) => {
     //     loadPoseModel('shooting');
     // }
 
-    // F - Interact with Nemotron (when in proximity and in gameplay mode)
-    if (key === 'f' && gameplayMode && characterModel && nemotronModel) {
-        const distance = characterModel.position.distanceTo(nemotronModel.position);
-        const INTERACTION_DISTANCE = 4;
+    // F - Universal object interaction (when in proximity and in gameplay mode)
+    if (key === 'f' && gameplayMode && nearestInteractableObject) {
+        console.log('[INTERACTION] F key pressed - interacting with nearest object');
 
-        if (distance <= INTERACTION_DISTANCE) {
-            console.log('[INTERACTION] F key pressed - showing Nemotron dialogue');
+        // Check if it's Nemotron (special case with riddle modal)
+        if (nearestInteractableObject.isNemotron) {
+            console.log('[INTERACTION] Showing Nemotron dialogue');
             showNemotronDialogue();
         } else {
-            console.log('[INTERACTION] F key pressed but too far from Nemotron');
+            // Show object viewer for all other interactable objects
+            console.log(`[INTERACTION] Showing object viewer for ${nearestInteractableObject.objectType}`);
+            showObjectViewer(nearestInteractableObject);
         }
     }
 });
