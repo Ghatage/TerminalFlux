@@ -446,7 +446,7 @@ async function generateAllAssets() {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
-                prompt: "seamless tileable sci-fi abstract ground texture, futuristic floor pattern, metallic hexagonal tiles with glowing blue circuits, high detail, top-down view, perfect for game terrain, technical sci-fi aesthetic, 4k resolution"
+                prompt: "Ultra high quality seamless tileable sci-fi ground texture, floor pattern for games, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
             })
         });
 
@@ -550,10 +550,18 @@ async function generateAllAssets() {
 
             // Generate 3D model for walking pose
             updateLoadingUI('🎲 Generating walking 3D model...', 'Converting images to 3D (2/3)');
-            const walkingViews = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
-            const walkingUrls = walkingViews.map(view =>
-                `http://localhost:8081/assets/character/walking/${view}.png`
-            );
+
+            // Use remote URLs from the response
+            const walkingUrls = [];
+            if (walkingData.remoteUrls) {
+                // Order matters for Trellis - front, back, left, right, angle_30, angle_-30
+                const viewOrder = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
+                for (const view of viewOrder) {
+                    if (walkingData.remoteUrls[view]) {
+                        walkingUrls.push(walkingData.remoteUrls[view]);
+                    }
+                }
+            }
 
             const walkingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
                 method: 'POST',
@@ -588,10 +596,18 @@ async function generateAllAssets() {
 
             // Generate 3D model for shooting pose
             updateLoadingUI('🎲 Generating shooting 3D model...', 'Converting images to 3D (3/3)');
-            const shootingViews = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
-            const shootingUrls = shootingViews.map(view =>
-                `http://localhost:8081/assets/character/shooting/${view}.png`
-            );
+
+            // Use remote URLs from the response
+            const shootingUrls = [];
+            if (shootingData.remoteUrls) {
+                // Order matters for Trellis - front, back, left, right, angle_30, angle_-30
+                const viewOrder = ['front', 'back', 'left', 'right', 'angle_30', 'angle_-30'];
+                for (const view of viewOrder) {
+                    if (shootingData.remoteUrls[view]) {
+                        shootingUrls.push(shootingData.remoteUrls[view]);
+                    }
+                }
+            }
 
             const shootingModelResponse = await fetch('http://localhost:8081/api/generate-3d-model', {
                 method: 'POST',

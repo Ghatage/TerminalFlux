@@ -127,7 +127,7 @@ app.post('/api/generate-texture', async (req, res) => {
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: prompt || "seamless tileable sci-fi abstract ground texture, futuristic floor pattern, metallic hexagonal tiles with glowing blue circuits, high detail, top-down view, perfect for game terrain, technical sci-fi aesthetic, 4k resolution"
+        prompt: prompt || "Ultra high quality seamless tileable ground texture, photorealistic floor pattern for games, highly detailed surface with depth and normal mapping details, PBR ready texture, crisp clean edges for 3D model conversion, top-down orthographic view, 8K resolution, ultra sharp details, perfect for high-end game environments"
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -189,7 +189,7 @@ app.post('/api/generate-character', async (req, res) => {
   try {
     const result = await fal.subscribe("fal-ai/alpha-image-232/text-to-image", {
       input: {
-        prompt: "futuristic low poly character, sci-fi robot, simple geometric shapes, clean polygonal design, game asset style, front view facing camera, white background, highly detailed, 4k resolution, standing pose, symmetrical"
+        prompt: "Ultra high quality 3D character design, photorealistic corgi dog, extremely detailed body parts with clean surface topology, perfect for 3D reconstruction, front view facing camera directly, neutral white background, studio lighting setup, ultra sharp focus, 8K resolution, highly detailed textures and materials, clean silhouette for 3D model generation, symmetrical design, no occlusions or overlapping parts"
       },
       logs: true,
       onQueueUpdate: (update) => {
@@ -250,13 +250,13 @@ app.post('/api/repose-character', async (req, res) => {
     return;
   }
 
-  // Define prompts for different views
+  // Define prompts for different views - ultra high quality for 3D reconstruction
   const viewPrompts = {
-    'back': 'back view of the same character, rear view, same style and design',
-    'left': 'left side view of the same character, profile from left, same style and design',
-    'right': 'right side view of the same character, profile from right, same style and design',
-    'angle_30': 'character rotated 30 degrees to the right, three-quarter view, same style and design',
-    'angle_-30': 'character rotated 30 degrees to the left, three-quarter view, same style and design'
+    'back': 'Ultra high quality back view of exact same character, rear view showing all details, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact proportions and design, no occlusions',
+    'left': 'Ultra high quality left side profile view of exact same character, perfect 90 degree profile from left, optimal for 3D model generation, clean white background, ultra sharp 8K resolution, maintain exact proportions',
+    'right': 'Ultra high quality right side profile view of exact same character, perfect 90 degree profile from right, optimal for 3D model generation, clean white background, ultra sharp 8K resolution, maintain exact proportions',
+    'angle_30': 'Ultra high quality three-quarter view, character rotated exactly 30 degrees to the right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain all details and proportions',
+    'angle_-30': 'Ultra high quality three-quarter view, character rotated exactly 30 degrees to the left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain all details and proportions'
   };
 
   try {
@@ -334,10 +334,10 @@ app.post('/api/generate-pose', async (req, res) => {
     return;
   }
 
-  // Define pose prompts
+  // Define pose prompts - ultra high quality for 3D model generation
   const posePrompts = {
-    'walking': 'character in walking pose, mid-stride, one leg forward, arms swinging naturally, same character and style',
-    'shooting': 'character in shooting pose, arms extended forward holding weapon, action pose, same character and style'
+    'walking': 'Ultra high quality exact same character in dynamic walking pose, mid-stride action with one leg forward, natural arm swing, perfect for 3D animation model, clean white background, ultra sharp 8K resolution, maintain all mechanical details and proportions, optimal for 3D reconstruction',
+    'shooting': 'Ultra high quality exact same character in shooting action pose, arms extended forward holding futuristic weapon, dynamic combat stance, perfect for 3D game model, clean white background, ultra sharp 8K resolution, maintain all mechanical details, optimal for 3D reconstruction'
   };
 
   const prompt = posePrompts[targetPose];
@@ -381,14 +381,19 @@ app.post('/api/generate-pose', async (req, res) => {
       await downloadFile(imageUrl, frontPath);
       console.log(`[SAVED] ${targetPose} front view saved`);
 
-      // Now generate other views for this pose
+      // Store remote URLs for all views
+      const remoteUrls = {
+        front: imageUrl  // Store the front view remote URL
+      };
+
+      // Now generate other views for this pose - ultra high quality for 3D reconstruction
       const views = ['back', 'left', 'right', 'angle_30', 'angle_-30'];
       const viewPrompts = {
-        'back': `back view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, rear view, same style and design`,
-        'left': `left side view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, profile from left, same style and design`,
-        'right': `right side view of character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose, profile from right, same style and design`,
-        'angle_30': `character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose rotated 30 degrees to the right, three-quarter view, same style and design`,
-        'angle_-30': `character in ${targetPose === 'walking' ? 'walking' : 'shooting'} pose rotated 30 degrees to the left, three-quarter view, same style and design`
+        'back': `Ultra high quality back view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect rear view for 3D reconstruction, clean white background, ultra sharp 8K resolution, maintain exact pose and proportions`,
+        'left': `Ultra high quality left side profile of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect 90 degree left view for 3D model generation, clean white background, ultra sharp 8K resolution`,
+        'right': `Ultra high quality right side profile of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, perfect 90 degree right view for 3D model generation, clean white background, ultra sharp 8K resolution`,
+        'angle_30': `Ultra high quality three-quarter view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, rotated exactly 30 degrees right, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution`,
+        'angle_-30': `Ultra high quality three-quarter view of character in ${targetPose === 'walking' ? 'dynamic walking' : 'shooting action'} pose, rotated exactly 30 degrees left, perfect for 3D reconstruction, clean white background, ultra sharp 8K resolution`
       };
 
       for (const viewName of views) {
@@ -407,6 +412,9 @@ app.post('/api/generate-pose', async (req, res) => {
           const viewPath = join(CHARACTER_DIR, targetPose, `${viewName}.png`);
           await downloadFile(viewImageUrl, viewPath);
           console.log(`[SAVED] ${targetPose} ${viewName} view saved`);
+
+          // Store the remote URL for this view
+          remoteUrls[viewName] = viewImageUrl;
         }
       }
 
@@ -414,6 +422,7 @@ app.post('/api/generate-pose', async (req, res) => {
         success: true,
         pose: targetPose,
         frontUrl: `/assets/character/${targetPose}/front.png`,
+        remoteUrls: remoteUrls,  // Return all remote URLs
         cached: false
       });
 
