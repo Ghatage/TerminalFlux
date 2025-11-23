@@ -93,6 +93,173 @@
             box-shadow: 0 0 30px rgba(0, 212, 255, 0.3);
         }
 
+        /* Character Selection Modal */
+        #character-modal {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.95);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 102;
+            opacity: 1;
+            transition: opacity 0.3s ease;
+        }
+
+        #character-modal.hidden {
+            display: none;
+            opacity: 0;
+        }
+
+        .modal-content {
+            background: rgba(0, 0, 0, 0.9);
+            padding: 50px 70px;
+            border-radius: 16px;
+            border: 2px solid #00d4ff;
+            box-shadow: 0 0 50px rgba(0, 212, 255, 0.5);
+            text-align: center;
+            max-width: 600px;
+            animation: modalAppear 0.5s ease;
+        }
+
+        @keyframes modalAppear {
+            from {
+                transform: scale(0.8);
+                opacity: 0;
+            }
+            to {
+                transform: scale(1);
+                opacity: 1;
+            }
+        }
+
+        .modal-content h2 {
+            color: #00d4ff;
+            font-size: 32px;
+            margin: 0 0 20px 0;
+            text-shadow: 0 0 20px rgba(0, 212, 255, 0.5);
+        }
+
+        .modal-content p {
+            color: #fff;
+            font-size: 18px;
+            margin: 0 0 30px 0;
+            opacity: 0.9;
+        }
+
+        #character-input {
+            width: 100%;
+            padding: 15px 20px;
+            font-size: 16px;
+            background: rgba(0, 0, 0, 0.5);
+            border: 2px solid rgba(0, 212, 255, 0.5);
+            border-radius: 8px;
+            color: #fff;
+            margin-bottom: 30px;
+            box-sizing: border-box;
+            transition: all 0.3s ease;
+        }
+
+        #character-input:focus {
+            outline: none;
+            border-color: #00d4ff;
+            box-shadow: 0 0 20px rgba(0, 212, 255, 0.3);
+            background: rgba(0, 0, 0, 0.7);
+        }
+
+        #character-input::placeholder {
+            color: rgba(255, 255, 255, 0.5);
+        }
+
+        #character-submit {
+            padding: 15px 40px;
+            font-size: 18px;
+            background: linear-gradient(135deg, #00d4ff, #0099cc);
+            color: #000;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            transition: all 0.3s ease;
+            box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+        }
+
+        #character-submit:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 6px 30px rgba(0, 212, 255, 0.5);
+            background: linear-gradient(135deg, #00e5ff, #00aadd);
+        }
+
+        #character-submit:active {
+            transform: translateY(0);
+        }
+
+        .model-selection {
+            margin: 20px 0 30px 0;
+            text-align: left;
+        }
+
+        .model-selection label {
+            color: #fff;
+            font-size: 16px;
+            margin-bottom: 10px;
+            display: block;
+            text-align: center;
+        }
+
+        .radio-group {
+            display: flex;
+            justify-content: center;
+            gap: 30px;
+        }
+
+        .radio-option {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            padding: 10px 20px;
+            border: 2px solid rgba(0, 212, 255, 0.3);
+            border-radius: 8px;
+            transition: all 0.3s ease;
+            background: rgba(0, 0, 0, 0.5);
+        }
+
+        .radio-option:hover {
+            border-color: rgba(0, 212, 255, 0.7);
+            background: rgba(0, 212, 255, 0.1);
+        }
+
+        .radio-option input[type="radio"] {
+            width: 18px;
+            height: 18px;
+            accent-color: #00d4ff;
+            cursor: pointer;
+        }
+
+        .radio-option label {
+            color: #fff;
+            font-size: 15px;
+            cursor: pointer;
+            margin: 0;
+        }
+
+        .radio-option input[type="radio"]:checked + label {
+            color: #00d4ff;
+            font-weight: bold;
+        }
+
+        .radio-option:has(input[type="radio"]:checked) {
+            border-color: #00d4ff;
+            background: rgba(0, 212, 255, 0.15);
+            box-shadow: 0 0 15px rgba(0, 212, 255, 0.3);
+        }
+
         .spinner {
             width: 50px;
             height: 50px;
@@ -114,7 +281,48 @@
     </style>
 </head>
 <body>
-    <div id="loading">
+    <!-- Character Selection Modal -->
+    <div id="character-modal">
+        <div class="modal-content">
+            <h2>Choose Your Character</h2>
+            <p>What do you want to be in this world?</p>
+            <input
+                type="text"
+                id="character-input"
+                placeholder="e.g., ninja warrior, space marine, medieval knight, cyborg assassin"
+                autofocus
+            >
+            <div class="model-selection">
+                <label>3D Model Generation Method:</label>
+                <div class="radio-group">
+                    <div class="radio-option">
+                        <input type="radio" id="trellis" name="modelType" value="trellis" checked>
+                        <label for="trellis">Trellis (Faster)</label>
+                    </div>
+                    <div class="radio-option">
+                        <input type="radio" id="rodin" name="modelType" value="rodin">
+                        <label for="rodin">Rodin (Higher Quality)</label>
+                    </div>
+                </div>
+            </div>
+            <div class="model-selection">
+                <label>Game Mode:</label>
+                <div class="radio-group">
+                    <div class="radio-option">
+                        <input type="radio" id="single-player" name="playerMode" value="1" checked>
+                        <label for="single-player">1 Player</label>
+                    </div>
+                    <div class="radio-option">
+                        <input type="radio" id="two-player" name="playerMode" value="2">
+                        <label for="two-player">2 Players</label>
+                    </div>
+                </div>
+            </div>
+            <button id="character-submit">Start Adventure</button>
+        </div>
+    </div>
+
+    <div id="loading" class="hidden">
         <div class="spinner"></div>
         <p>Initializing...</p>
         <p style="font-size: 14px; margin-top: 10px;">Starting up</p>
@@ -134,7 +342,6 @@
         <p style="margin-top: 10px;"><strong>Pose Switching:</strong></p>
         <p>1: Idle Pose</p>
         <p>2: Walking Pose</p>
-        <p>3: Shooting Pose</p>
         <p style="margin-top: 10px;"><strong>Camera:</strong></p>
         <p>🖱️ Left Mouse: Rotate</p>
         <p>🖱️ Right Mouse: Pan</p>

@@ -140,6 +140,14 @@ for (let i = 0; i < numRingLights; i++) {
 const textureLoader = new THREE.TextureLoader();
 const gltfLoader = new GLTFLoader();
 const loadingElement = document.getElementById('loading');
+const characterModal = document.getElementById('character-modal');
+const characterInput = document.getElementById('character-input');
+const characterSubmit = document.getElementById('character-submit');
+
+// Store the user's character choice, model type, and player mode
+let userCharacter = 'sci-fi robot warrior'; // Default fallback
+let userModelType = 'trellis'; // Default to Trellis
+let userPlayerMode = 1; // Default to single player
 
 // Ground plane and character model
 let groundMesh;
@@ -452,13 +460,14 @@ async function parallelFetch(requests) {
 }
 
 // Main generation pipeline - PARALLELIZED VERSION
-async function generateAllAssets() {
+async function generateAllAssets(character = 'sci-fi robot warrior') {
     const startTime = Date.now();
 
     try {
         // ==================== PHASE 1: Ground + Idle Base (Parallel) ====================
         updateLoadingUI('🚀 Phase 1: Starting parallel generation...', 'Ground texture + Idle character base');
         console.log('🚀 PHASE 1: Generating ground and idle base in parallel...');
+        console.log(`Character: ${character}`);
 
         const phase1Results = await parallelFetch([
             {
@@ -476,7 +485,7 @@ async function generateAllAssets() {
                 options: {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ pose: 'idle' })
+                    body: JSON.stringify({ pose: 'idle', character: character })
                 }
             }
         ]);
@@ -542,9 +551,9 @@ async function generateAllAssets() {
         const groundTexture = await groundTexturePromise;
         createGround(groundTexture);
 
-        // ==================== PHASE 3: Idle 3D + Pose Bases (3 Parallel) ====================
-        updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking/Shooting base poses');
-        console.log('🎯 PHASE 3: Generating idle 3D model and other pose bases in parallel...');
+        // ==================== PHASE 3: Idle 3D + Pose Bases (2 Parallel) ====================
+        updateLoadingUI('🎯 Phase 3: Building 3D models...', 'Idle 3D + Walking base pose');
+        console.log('🎯 PHASE 3: Generating idle 3D model and walking pose base in parallel...');
 
         const phase3Results = await parallelFetch([
             {
@@ -554,8 +563,9 @@ async function generateAllAssets() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        imageUrls: idleViewUrls.slice(0, 6),
-                        pose: 'idle'
+                        imageUrls: idleViewUrls.slice(0, 5),  // Changed from 6 to 5 (new API limit)
+                        pose: 'idle',
+                        modelType: userModelType  // Pass selected model type
                     })
                 }
             },
@@ -567,31 +577,33 @@ async function generateAllAssets() {
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ targetPose: 'walking' })
                 }
-            },
-            {
-                type: 'shooting-base',
-                url: 'http://localhost:8081/api/generate-pose',
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ targetPose: 'shooting' })
-                }
             }
+            // SHOOTING POSE GENERATION DISABLED
+            // {
+            //     type: 'shooting-base',
+            //     url: 'http://localhost:8081/api/generate-pose',
+            //     options: {
+            //         method: 'POST',
+            //         headers: { 'Content-Type': 'application/json' },
+            //         body: JSON.stringify({ targetPose: 'shooting' })
+            //     }
+            // }
         ]);
 
         // Process Phase 3 results
         const idleModelData = phase3Results.find(r => r._requestType === 'idle-3d');
         const walkingBaseData = phase3Results.find(r => r._requestType === 'walking-base');
-        const shootingBaseData = phase3Results.find(r => r._requestType === 'shooting-base');
+        // const shootingBaseData = phase3Results.find(r => r._requestType === 'shooting-base');
 
         if (!idleModelData.success) throw new Error(idleModelData.error || 'Failed to generate idle 3D model');
         console.log(`✅ Idle 3D model ${idleModelData.cached ? 'cached' : 'generated'}`);
 
         const walkingImageUrl = walkingBaseData?.success ? (walkingBaseData.remoteUrl || walkingBaseData.imageUrl) : null;
-        const shootingImageUrl = shootingBaseData?.success ? (shootingBaseData.remoteUrl || shootingBaseData.imageUrl) : null;
+        // const shootingImageUrl = shootingBaseData?.success ? (shootingBaseData.remoteUrl || shootingBaseData.imageUrl) : null;
+        const shootingImageUrl = null; // Shooting pose disabled
 
         if (walkingImageUrl) console.log(`✅ Walking base ${walkingBaseData.cached ? 'cached' : 'generated'}`);
-        if (shootingImageUrl) console.log(`✅ Shooting base ${shootingBaseData.cached ? 'cached' : 'generated'}`);
+        // if (shootingImageUrl) console.log(`✅ Shooting base ${shootingBaseData.cached ? 'cached' : 'generated'}`);
 
         // ==================== PHASE 4: All Views + 3D Models (12 Parallel) ====================
         updateLoadingUI('💥 Phase 4: Final parallel generation...', 'All remaining views and 3D models');
@@ -619,25 +631,26 @@ async function generateAllAssets() {
             });
         }
 
-        // Add shooting view requests if shooting base succeeded
-        if (shootingImageUrl) {
-            views.forEach(viewName => {
-                phase4Requests.push({
-                    type: 'shooting-view',
-                    meta: { viewName },
-                    url: 'http://localhost:8081/api/generate-view',
-                    options: {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                            pose: 'shooting',
-                            viewName: viewName,
-                            imageUrl: shootingImageUrl
-                        })
-                    }
-                });
-            });
-        }
+        // SHOOTING VIEWS GENERATION DISABLED
+        // // Add shooting view requests if shooting base succeeded
+        // if (shootingImageUrl) {
+        //     views.forEach(viewName => {
+        //         phase4Requests.push({
+        //             type: 'shooting-view',
+        //             meta: { viewName },
+        //             url: 'http://localhost:8081/api/generate-view',
+        //             options: {
+        //                 method: 'POST',
+        //                 headers: { 'Content-Type': 'application/json' },
+        //                 body: JSON.stringify({
+        //                     pose: 'shooting',
+        //                     viewName: viewName,
+        //                     imageUrl: shootingImageUrl
+        //                 })
+        //             }
+        //         });
+        //     });
+        // }
 
         // Execute all Phase 4 view generations in parallel
         let walkingViewUrls = [];
@@ -660,19 +673,20 @@ async function generateAllAssets() {
                 }
             }
 
-            // Collect shooting view URLs
-            if (shootingImageUrl) {
-                shootingViewUrls = [shootingImageUrl]; // Start with front
-                for (const viewName of viewOrder) {
-                    const viewResult = phase4Results.find(r =>
-                        r._requestType === 'shooting-view' && r._requestMeta?.viewName === viewName
-                    );
-                    if (viewResult?.success) {
-                        shootingViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
-                        console.log(`✅ Shooting ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
-                    }
-                }
-            }
+            // SHOOTING VIEW COLLECTION DISABLED
+            // // Collect shooting view URLs
+            // if (shootingImageUrl) {
+            //     shootingViewUrls = [shootingImageUrl]; // Start with front
+            //     for (const viewName of viewOrder) {
+            //         const viewResult = phase4Results.find(r =>
+            //             r._requestType === 'shooting-view' && r._requestMeta?.viewName === viewName
+            //         );
+            //         if (viewResult?.success) {
+            //             shootingViewUrls.push(viewResult.remoteUrl || viewResult.imageUrl);
+            //             console.log(`✅ Shooting ${viewName} view ${viewResult.cached ? 'cached' : 'generated'}`);
+            //         }
+            //     }
+            // }
         }
 
         // Generate 3D models for walking and shooting in parallel
@@ -686,30 +700,32 @@ async function generateAllAssets() {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
-                        imageUrls: walkingViewUrls.slice(0, 6),
-                        pose: 'walking'
+                        imageUrls: walkingViewUrls.slice(0, 5),  // Changed from 6 to 5 (new API limit)
+                        pose: 'walking',
+                        modelType: userModelType  // Pass selected model type
                     })
                 }
             });
         }
 
-        if (shootingViewUrls.length >= 3) {
-            phase4ModelRequests.push({
-                type: 'shooting-3d',
-                url: 'http://localhost:8081/api/generate-3d-model',
-                options: {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        imageUrls: shootingViewUrls.slice(0, 6),
-                        pose: 'shooting'
-                    })
-                }
-            });
-        }
+        // SHOOTING 3D MODEL GENERATION DISABLED
+        // if (shootingViewUrls.length >= 3) {
+        //     phase4ModelRequests.push({
+        //         type: 'shooting-3d',
+        //         url: 'http://localhost:8081/api/generate-3d-model',
+        //         options: {
+        //             method: 'POST',
+        //             headers: { 'Content-Type': 'application/json' },
+        //             body: JSON.stringify({
+        //                 imageUrls: shootingViewUrls.slice(0, 6),
+        //                 pose: 'shooting'
+        //             })
+        //         }
+        //     });
+        // }
 
         if (phase4ModelRequests.length > 0) {
-            updateLoadingUI('🎲 Finalizing 3D models...', 'Converting walking and shooting poses');
+            updateLoadingUI('🎲 Finalizing 3D models...', 'Converting walking pose to 3D');
             const phase4ModelResults = await parallelFetch(phase4ModelRequests);
 
             phase4ModelResults.forEach(result => {
@@ -757,7 +773,7 @@ let time = 0;
 const timeStep = 1 / 60; // Physics runs at 60 FPS
 
 // Movement constants
-const MOVE_SPEED = 5;
+const MOVE_SPEED = 12;  // Increased from 5 to 12 for faster movement
 const JUMP_FORCE = 8;
 const CAMERA_OFFSET = new THREE.Vector3(0, 3, 5); // Offset for third-person camera (back and up)
 const CAMERA_LERP_FACTOR = 0.1; // Smooth camera follow speed
@@ -971,6 +987,7 @@ const keys = {
 
 // Track keyboard input for movement
 window.addEventListener('keydown', (event) => {
+    if (!event.key) return; // Guard against undefined key
     const key = event.key.toLowerCase();
     if (key === 'w') keys.w = true;
     if (key === 'a') keys.a = true;
@@ -980,6 +997,7 @@ window.addEventListener('keydown', (event) => {
 });
 
 window.addEventListener('keyup', (event) => {
+    if (!event.key) return; // Guard against undefined key
     const key = event.key.toLowerCase();
     if (key === 'w') keys.w = false;
     if (key === 'a') keys.a = false;
@@ -993,6 +1011,7 @@ let helpersVisible = true;
 let debugInfoVisible = true;
 
 window.addEventListener('keydown', (event) => {
+    if (!event.key) return; // Guard against undefined key
     const key = event.key.toLowerCase();
 
     // SETUP MODE: R/T rotate character, S to save and start gameplay
@@ -1097,22 +1116,99 @@ window.addEventListener('keydown', (event) => {
         console.log(`[DEBUG] All UI, helpers, and physics boxes ${debugInfoVisible ? 'shown' : 'hidden'}`);
     }
 
-    // Pose switching controls (number keys 1-3)
+    // Pose switching controls (number keys 1-2)
     if (key === '1' && gameplayMode) {
         loadPoseModel('idle');
     }
     if (key === '2' && gameplayMode) {
         loadPoseModel('walking');
     }
-    if (key === '3' && gameplayMode) {
-        loadPoseModel('shooting');
+    // SHOOTING POSE DISABLED
+    // if (key === '3' && gameplayMode) {
+    //     loadPoseModel('shooting');
+    // }
+});
+
+// Initialize the app with character selection
+async function initializeApp() {
+    // First check if we're in reuse mode and have assets
+    try {
+        const response = await fetch('http://localhost:8081/api/check-assets');
+        const assetStatus = await response.json();
+
+        console.log('Asset status:', assetStatus);
+
+        // If reuse is enabled and all assets exist, skip the modal
+        if (assetStatus.reuseEnabled && assetStatus.allExist) {
+            console.log('[REUSE] All assets exist, skipping character selection');
+            characterModal.classList.add('hidden');
+            loadingElement.classList.remove('hidden');
+            generateAllAssets(userCharacter); // Use default character
+        } else {
+            // Show the character selection modal
+            console.log('Showing character selection modal');
+            characterModal.classList.remove('hidden');
+            loadingElement.classList.add('hidden');
+
+            // Focus on the input field
+            characterInput.focus();
+        }
+    } catch (error) {
+        console.error('Error checking asset status:', error);
+        // Show modal as fallback
+        characterModal.classList.remove('hidden');
+        loadingElement.classList.add('hidden');
+    }
+}
+
+// Handle character submission
+characterSubmit.addEventListener('click', () => {
+    const character = characterInput.value.trim();
+
+    // Get selected model type from radio buttons
+    const selectedModelType = document.querySelector('input[name="modelType"]:checked');
+    if (selectedModelType) {
+        userModelType = selectedModelType.value;
+    }
+
+    // Get selected player mode from radio buttons
+    const selectedPlayerMode = document.querySelector('input[name="playerMode"]:checked');
+    if (selectedPlayerMode) {
+        userPlayerMode = parseInt(selectedPlayerMode.value);
+    }
+
+    if (character) {
+        userCharacter = character;
+        console.log('User selected character:', userCharacter);
+        console.log('User selected model type:', userModelType);
+        console.log('User selected player mode:', userPlayerMode, 'player(s)');
+
+        // Hide modal, show loading
+        characterModal.classList.add('hidden');
+        loadingElement.classList.remove('hidden');
+
+        // Start generation with the selected character
+        generateAllAssets(userCharacter);
+    } else {
+        // Flash the input border to indicate it's required
+        characterInput.style.borderColor = '#ff4444';
+        setTimeout(() => {
+            characterInput.style.borderColor = '';
+        }, 500);
+    }
+});
+
+// Allow Enter key to submit
+characterInput.addEventListener('keypress', (event) => {
+    if (event.key === 'Enter') {
+        characterSubmit.click();
     }
 });
 
 // Start animation immediately
 animate();
 
-// Start the generation pipeline
-generateAllAssets();
+// Initialize the app (will show modal or start generation)
+initializeApp();
 
 console.log('🚀 Three.js scene initialized!');
