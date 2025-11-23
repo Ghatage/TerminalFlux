@@ -165,6 +165,7 @@ let groundMaterial; // Store ground material globally
 let characterModel;
 let characterBody;
 let currentPose = 'idle'; // Track current pose
+let isWalkingMirrored = false; // Track if walking pose is currently mirrored
 
 // Physics visualization helpers
 let characterBoxHelper;
@@ -464,55 +465,11 @@ async function loadPoseModel(pose) {
             savedRotation = characterModel.rotation.y;
         }
 
-        // Remove old character model and dispose of resources
-        if (characterModel) {
-            // Remove from scene
-            scene.remove(characterModel);
+        // Save references to old model and body (don't remove yet - prevents flicker)
+        const oldModel = characterModel;
+        const oldBody = characterBody;
 
-            // Dispose of helpers
-            if (characterModel.userData.axesHelper) {
-                scene.remove(characterModel.userData.axesHelper);
-                characterModel.userData.axesHelper.geometry?.dispose();
-                characterModel.userData.axesHelper.material?.dispose();
-            }
-            if (characterModel.userData.arrowHelper) {
-                scene.remove(characterModel.userData.arrowHelper);
-                // ArrowHelper has multiple children
-                characterModel.userData.arrowHelper.traverse((child) => {
-                    if (child.geometry) child.geometry.dispose();
-                    if (child.material) child.material.dispose();
-                });
-            }
-            if (characterModel.userData.boxHelper) {
-                scene.remove(characterModel.userData.boxHelper);
-                characterModel.userData.boxHelper.geometry?.dispose();
-                characterModel.userData.boxHelper.material?.dispose();
-            }
-
-            // Dispose of the model itself
-            characterModel.traverse((child) => {
-                if (child.isMesh) {
-                    child.geometry?.dispose();
-                    if (child.material) {
-                        if (Array.isArray(child.material)) {
-                            child.material.forEach(mat => mat.dispose());
-                        } else {
-                            child.material.dispose();
-                        }
-                    }
-                }
-            });
-
-            // Clear reference
-            characterModel = null;
-        }
-
-        // Remove old physics body
-        if (characterBody) {
-            world.removeBody(characterBody);
-        }
-
-        // Load the new model (use session-specific path if session is active)
+        // Load the new model FIRST (use session-specific path if session is active)
         const modelUrl = currentSessionId
             ? `/assets/${currentSessionId}/models/character_${pose}.glb`
             : `/assets/models/character_${pose}.glb`;
@@ -527,6 +484,51 @@ async function loadPoseModel(pose) {
             characterModel.rotation.y = savedRotation;
         }
 
+        // Now that new model is loaded and positioned, safely remove and dispose old model
+        if (oldModel) {
+            // Remove from scene
+            scene.remove(oldModel);
+
+            // Dispose of helpers
+            if (oldModel.userData.axesHelper) {
+                scene.remove(oldModel.userData.axesHelper);
+                oldModel.userData.axesHelper.geometry?.dispose();
+                oldModel.userData.axesHelper.material?.dispose();
+            }
+            if (oldModel.userData.arrowHelper) {
+                scene.remove(oldModel.userData.arrowHelper);
+                // ArrowHelper has multiple children
+                oldModel.userData.arrowHelper.traverse((child) => {
+                    if (child.geometry) child.geometry.dispose();
+                    if (child.material) child.material.dispose();
+                });
+            }
+            if (oldModel.userData.boxHelper) {
+                scene.remove(oldModel.userData.boxHelper);
+                oldModel.userData.boxHelper.geometry?.dispose();
+                oldModel.userData.boxHelper.material?.dispose();
+            }
+
+            // Dispose of the model itself
+            oldModel.traverse((child) => {
+                if (child.isMesh) {
+                    child.geometry?.dispose();
+                    if (child.material) {
+                        if (Array.isArray(child.material)) {
+                            child.material.forEach(mat => mat.dispose());
+                        } else {
+                            child.material.dispose();
+                        }
+                    }
+                }
+            });
+        }
+
+        // Remove old physics body
+        if (oldBody) {
+            world.removeBody(oldBody);
+        }
+
         currentPose = pose;
         // Successfully switched to new pose
 
@@ -539,6 +541,33 @@ async function loadPoseModel(pose) {
     } catch (error) {
         console.error(`Error loading ${pose} pose:`, error);
         console.error(`[POSE] Error: ${error.message}`);
+    }
+}
+
+// Function to mirror the character model
+function mirrorCharacterModel(shouldMirror) {
+    if (!characterModel) return;
+
+    isWalkingMirrored = shouldMirror;
+
+    if (shouldMirror) {
+        // Flip model horizontally along X-axis
+        characterModel.scale.x = -Math.abs(characterModel.scale.x);
+
+        // Fix materials for proper lighting when mirrored
+        characterModel.traverse((child) => {
+            if (child.isMesh && child.material) {
+                child.material.side = THREE.DoubleSide;
+                child.material.needsUpdate = true;
+            }
+        });
+
+        console.log('[POSE] Mirrored walking pose');
+    } else {
+        // Restore normal orientation
+        characterModel.scale.x = Math.abs(characterModel.scale.x);
+
+        console.log('[POSE] Normal walking pose');
     }
 }
 
@@ -1077,7 +1106,7 @@ let time = 0;
 const timeStep = 1 / 60; // Physics runs at 60 FPS
 
 // Movement constants
-const MOVE_SPEED = 12;  // Increased from 5 to 12 for faster movement
+const MOVE_SPEED = 20;  // Increased for faster movement
 const JUMP_FORCE = 8;
 const ROTATE_SPEED = 0.05; // Speed of character rotation (from unicorngame)
 const CAMERA_OFFSET = new THREE.Vector3(0, 3, 5); // Offset for third-person camera (back and up)
@@ -1085,7 +1114,7 @@ const CAMERA_LERP_FACTOR = 0.1; // Smooth camera follow speed
 
 // Auto-swap pose tracking
 let lastPoseSwapTime = 0;
-const POSE_SWAP_INTERVAL = 250; // 0.25 seconds in milliseconds (doubled speed from 500ms)
+const POSE_SWAP_INTERVAL = 500; // 0.5 seconds in milliseconds (reduced from 250ms for smoother transitions)
 let isAutoSwapping = false;
 let lastMovementState = false;
 
@@ -1141,15 +1170,23 @@ function animate() {
                 // Immediately switch to walking pose when starting movement
                 if (currentPose === 'idle') {
                     loadPoseModel('walking');
+                    mirrorCharacterModel(false); // Start with normal walking
                 }
             }
 
-            // Auto-swap poses every 0.5 seconds while moving
+            // Auto-swap poses every 0.5 seconds while moving (two-state cycle)
             if (isAutoSwapping && (currentTime - lastPoseSwapTime) >= POSE_SWAP_INTERVAL) {
                 lastPoseSwapTime = currentTime;
-                // Toggle between idle and walking
-                const nextPose = currentPose === 'idle' ? 'walking' : 'idle';
-                loadPoseModel(nextPose);
+
+                // Two-state cycle: walking (normal) ↔ walking (mirrored)
+                if (currentPose === 'idle') {
+                    // idle → walking (normal) - initial transition
+                    loadPoseModel('walking');
+                    mirrorCharacterModel(false);
+                } else if (currentPose === 'walking') {
+                    // Toggle between normal and mirrored walking
+                    mirrorCharacterModel(!isWalkingMirrored);
+                }
             }
 
             // Get character's forward direction based on its rotation
@@ -1182,10 +1219,11 @@ function animate() {
             // Stop auto-swapping and return to idle when movement stops
             if (isAutoSwapping) {
                 isAutoSwapping = false;
-                // Return to idle pose when stopping
+                // Return to idle pose when stopping and reset mirror
                 if (currentPose !== 'idle') {
                     loadPoseModel('idle');
                 }
+                mirrorCharacterModel(false); // Reset mirror state
             }
         }
 
@@ -1497,9 +1535,11 @@ window.addEventListener('keydown', (event) => {
     // Pose switching controls (number keys 1-2) - disabled during auto-swapping
     if (key === '1' && gameplayMode && !isAutoSwapping) {
         loadPoseModel('idle');
+        mirrorCharacterModel(false); // Reset mirror when manually switching
     }
     if (key === '2' && gameplayMode && !isAutoSwapping) {
         loadPoseModel('walking');
+        mirrorCharacterModel(false); // Reset mirror when manually switching
     }
     // SHOOTING POSE DISABLED
     // if (key === '3' && gameplayMode) {
